@@ -1,0 +1,19 @@
+# Environment — never commit real keys
+.env
+.secrets.env
+
+# Auto-generated at runtime
+workflow.py
+
+# Frontend build artifacts
+orbit-ui/node_modules/
+orbit-ui/dist/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Misc
+commands.txt
+.DS_Store

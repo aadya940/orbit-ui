@@ -1,0 +1,33 @@
+services:
+  vm:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "6080:6080"   # noVNC WebSocket
+      - "7878:7878"   # OculOS daemon
+      - "8000:8000"   # FastAPI backend
+    volumes:
+      - chrome-profile:/root/.config/google-chrome
+      - workspace:/workspace
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Future: to run N parallel VMs, extract backend.py to its own service,
+    # then scale this service: docker compose up --scale vm=N
+
+  ui:
+    build:
+      context: ./orbit-ui
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:80"
+    depends_on:
+      - vm
+    restart: unless-stopped
+
+volumes:
+  chrome-profile:
+  workspace:

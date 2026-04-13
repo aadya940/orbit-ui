@@ -1,0 +1,10 @@
+/* Removed default Vite styles to prevent interfering with App layout */
+
+@keyframes orbit-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--node-color, #2563eb); }
+  50%       { box-shadow: 0 0 0 5px color-mix(in srgb, var(--node-color, #2563eb) 40%, transparent); }
+}
+
+.node-running {
+  animation: orbit-pulse 1s ease-in-out infinite;
+}
