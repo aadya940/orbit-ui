@@ -342,7 +342,7 @@ def _emit_node(
     steps_arg = f", max_steps={max_steps}" if max_steps is not None else ""
     common = f"session=s, llm={llm}"
     if node.type != "Check":
-        common += f"{steps_arg}, verbose=verbose, pause_event=pause_event"
+        common += f"{steps_arg}, verbose=verbose, pause_event=pause_event, planner=False"
         if not global_cfg.human_in_the_loop:
             common += ", human_in_the_loop=False"
         # log_file_path is handled at workflow level via stdout Tee, not per-verb
