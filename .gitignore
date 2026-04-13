@@ -6,8 +6,8 @@
 workflow.py
 
 # Frontend build artifacts
-orbit-ui/node_modules/
-orbit-ui/dist/
+frontend/node_modules/
+frontend/dist/
 
 # Python
 __pycache__/

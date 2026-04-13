@@ -1,7 +1,7 @@
 services:
   vm:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     ports:
       - "6080:6080"   # noVNC WebSocket
@@ -18,7 +18,7 @@ services:
 
   ui:
     build:
-      context: ./orbit-ui
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         VITE_API_URL: http://localhost:8000
