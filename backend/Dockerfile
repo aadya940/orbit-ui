@@ -78,7 +78,7 @@ RUN mkdir -p /root/Desktop /root/Downloads /root/Documents \
 
 # App code lives in /app — not mounted, never hidden by volumes
 WORKDIR /app
-COPY backend.py codegen.py state.py workflow.py /app/
+COPY backend.py codegen.py state.py /app/
 
 # /workspace is the data directory — mounted as a volume by docker compose
 RUN mkdir -p /workspace
