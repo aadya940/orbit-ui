@@ -17,13 +17,14 @@ const DEFAULT_GRAPH = {
 };
 
 const TYPE_CONFIG = {
-  Navigate: { target: '', max_steps: 20, extra_info: '', llm: null },
-  Do: { task: '', max_steps: 20, extra_info: '', llm: null },
-  Check: { condition: '', max_steps: 10, llm: null },
+  Navigate: { target: '', max_steps: null, extra_info: '', llm: null },
+  Do: { task: '', max_steps: null, extra_info: '', llm: null },
+  Check: { condition: '', max_steps: null, llm: null },
   Fill: { target: '', data: {}, llm: null },
-  Read: { task: '', max_steps: 20, llm: null },
+  Read: { task: '', max_steps: null, llm: null },
   Code: { code: '', llm: null },
   Agent: { class_name: '', task: '', prompt_template: '', max_steps: 20, llm: null },
+  ForEach: { items_expr: '', loop_var: 'item', llm: null },
 };
 
 function createNode(type) {

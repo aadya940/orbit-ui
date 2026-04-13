@@ -219,7 +219,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
   }
 
   const showSchema = nodeType === "Read" || nodeType === "Do" || nodeType === "Agent";
-  const showMaxSteps = nodeType !== "Code";
+  const showMaxSteps = nodeType !== "Code" && nodeType !== "ForEach";
   const showExtraInfo = nodeType === "Do" || nodeType === "Navigate";
 
   return (
@@ -301,6 +301,31 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
         </>
       )}
 
+      {nodeType === "ForEach" && (
+        <>
+          <div style={styles.fieldGroup}>
+            <label style={styles.label}>Items expression</label>
+            <textarea
+              style={{ ...styles.textarea, minHeight: 70, fontFamily: 'Consolas, monospace', fontSize: 11 }}
+              value={config.items_expr || ''}
+              onChange={(e) => updateConfig("items_expr", e.target.value)}
+              placeholder={"open('/workspace/uploads/links.txt').read().splitlines()\n# or: ['url1', 'url2']\n# or: read_node_out.urls"}
+            />
+            <span style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>Any Python expression returning an iterable. Use a Code node above for imports.</span>
+          </div>
+          <div style={styles.fieldGroup}>
+            <label style={styles.label}>Loop variable name</label>
+            <input
+              style={styles.input}
+              value={config.loop_var || 'item'}
+              onChange={(e) => updateConfig("loop_var", e.target.value)}
+              placeholder="item"
+            />
+            <span style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>Reference as {'{{item}}'} in downstream node targets and tasks</span>
+          </div>
+        </>
+      )}
+
       {(showMaxSteps || showExtraInfo) && (
         <>
           <hr style={divider} />
@@ -308,7 +333,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
           {showMaxSteps && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>Max steps</label>
-              <input style={styles.numberInput} type="number" min={1} max={100} value={config.max_steps || 30} onChange={(e) => updateConfig("max_steps", parseInt(e.target.value) || 30)} />
+              <input style={styles.numberInput} type="number" min={1} max={100} value={config.max_steps ?? ''} placeholder="unlimited" onChange={(e) => updateConfig("max_steps", e.target.value === '' ? null : parseInt(e.target.value) || null)} />
             </div>
           )}
           {showExtraInfo && (
@@ -317,7 +342,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
               <textarea style={styles.textarea} value={config.extra_info || ""} onChange={(e) => updateConfig("extra_info", e.target.value)} placeholder="Advisory context for the agent..." />
             </div>
           )}
-          {nodeType !== "Code" && (
+          {nodeType !== "Code" && nodeType !== "ForEach" && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>LLM override</label>
               <datalist id="node-llm-suggestions">

@@ -52,7 +52,7 @@ class Node:
     config: dict[str, Any]
     output_schema: OutputSchema | None
 
-    VALID_TYPES = {"Do", "Navigate", "Check", "Fill", "Read", "Code", "Agent"}
+    VALID_TYPES = {"Do", "Navigate", "Check", "Fill", "Read", "Code", "Agent", "ForEach"}
 
 
 @dataclass
@@ -230,6 +230,7 @@ def _resolve_secrets(text: str) -> tuple[str, bool]:
 
 
 _TEMPLATE_RE = re.compile(r"\{\{(\w+)\.(\w+)\}\}")
+_BARE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 def _resolve_all(
@@ -238,6 +239,11 @@ def _resolve_all(
     """Run both secrets and node-template resolution. Returns (text, uses_fstring)."""
     text, is_secret = _resolve_secrets(text)
     text, is_template = _resolve_templates(text, nodes_by_id)
+    # Also resolve bare {{var}} (loop variables like {{item}})
+    bare_result, bare_count = _BARE_VAR_RE.subn(r"{\1}", text)
+    if bare_count:
+        text = bare_result
+        is_template = True
     return text, (is_secret or is_template)
 
 
@@ -310,7 +316,7 @@ def _emit_node(
     pad = "    " * indent
     lines = []
     llm = _node_llm_expr(node, global_cfg)
-    max_steps = node.config.get("max_steps", 30)
+    max_steps = node.config.get("max_steps") or None
     extra_info = node.config.get("extra_info")
 
     if node.type == "Code":
@@ -328,14 +334,16 @@ def _emit_node(
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
 
     # Common kwargs
+    steps_arg = f", max_steps={max_steps}" if max_steps is not None else ""
     common = f"session=s, llm={llm}"
     if node.type != "Check":
-        common += f", max_steps={max_steps}, verbose=verbose, pause_event=pause_event"
+        common += f"{steps_arg}, verbose=verbose, pause_event=pause_event"
         if not global_cfg.human_in_the_loop:
             common += ", human_in_the_loop=False"
         # log_file_path is handled at workflow level via stdout Tee, not per-verb
     else:
-        common += f", max_steps={max_steps}"
+        if max_steps is not None:
+            common += f", max_steps={max_steps}"
 
     if extra_info and node.type in ("Do", "Navigate"):
         common += f", extra_info={extra_info!r}"
@@ -596,6 +604,8 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
 
     # Walk nodes in topo order, emit code
     emitted: set[str] = set()
+    foreach_indent = 2   # bumped to 3 once a ForEach node is emitted
+    foreach_node_id: str | None = None
     i = 0
     while i < len(order):
         nid = order[i]
@@ -605,33 +615,46 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
 
         node = nodes_by_id[nid]
 
+        # Case 0: ForEach node — open a for-loop over the items expression
+        if node.type == "ForEach":
+            loop_var = (node.config.get("loop_var") or "item").strip()
+            items_expr = (node.config.get("items_expr") or "[]").strip()
+            pad = "    " * foreach_indent
+            lines.append(f"{pad}report_node({nid!r}, 'running')")
+            lines.append(f"{pad}for {loop_var} in ({items_expr}):")
+            foreach_indent = 3
+            foreach_node_id = nid
+            emitted.add(nid)
+            i += 1
+            continue
+
         # Case 1: Loop header
         if nid in loop_headers:
             lg = loop_headers[nid]
             tail_node = nodes_by_id[lg.tail]
-            lines.append(f"        for _attempt_{nid} in range({lg.max_iterations}):")
+            loop_pad = "    " * foreach_indent
+            inner_pad_n = foreach_indent + 1
+            lines.append(f"{loop_pad}for _attempt_{nid} in range({lg.max_iterations}):")
 
             if node.type == "Check":
                 # Pattern A: Check is the loop header (check-first retry)
-                # Emit body nodes, then tail action, then the Check at the end.
                 for body_nid in lg.body:
                     body_node = nodes_by_id[body_nid]
-                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=3, log_file_path=log_file_path))
+                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
                     emitted.add(body_nid)
 
                 if tail_node.type != "Check":
-                    lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, indent=3, log_file_path=log_file_path))
+                    lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
                 emitted.add(lg.tail)
 
                 check_node, check_nid = node, nid
             else:
                 # Pattern B: Non-Check header (e.g. Navigate → Check).
-                # Emit the header action first, then body nodes, then the Check tail.
-                lines.extend(_emit_node(node, global_cfg, nodes_by_id, indent=3, log_file_path=log_file_path))
+                lines.extend(_emit_node(node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
 
                 for body_nid in lg.body:
                     body_node = nodes_by_id[body_nid]
-                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=3, log_file_path=log_file_path))
+                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
                     emitted.add(body_nid)
 
                 if tail_node.type != "Check":
@@ -644,24 +667,24 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
 
             # Emit the Check condition
             check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
-            lines.append(f'            report_node("{check_nid}", "running")')
-            lines.append(f'            print("--- {check_nid}: {check_node.label} ---")')
-            lines.append(f"            if {check_expr}:")
+            inner_spaces = "    " * inner_pad_n
+            lines.append(f'{inner_spaces}report_node("{check_nid}", "running")')
+            lines.append(f'{inner_spaces}print("--- {check_nid}: {check_node.label} ---")')
+            lines.append(f"{inner_spaces}if {check_expr}:")
 
-            # Break when the true branch exits the loop; otherwise pass (continue)
             cond = conditionals.get(check_nid, {})
             true_target = cond.get("true")
+            break_spaces = "    " * (inner_pad_n + 1)
             if true_target and true_target not in loop_members:
-                lines.append(f"                break")
+                lines.append(f"{break_spaces}break")
             else:
-                # true stays in loop → false must exit; invert: break on not-check
-                lines.append(f"                pass")
+                lines.append(f"{break_spaces}pass")
 
-            lines.append(f"            if _attempt_{nid} < {lg.max_iterations - 1}:")
-            lines.append(f"                await asyncio.sleep(3)")
-            lines.append(f"        else:")
-            lines.append(f'            print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
-            lines.append(f"            return")
+            lines.append(f"{inner_spaces}if _attempt_{nid} < {lg.max_iterations - 1}:")
+            lines.append(f"{break_spaces}await asyncio.sleep(3)")
+            lines.append(f"{loop_pad}else:")
+            lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+            lines.append(f"{loop_pad}    return")
 
             emitted.add(nid)
             i += 1
@@ -671,22 +694,24 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         if nid in conditionals and nid not in loop_members:
             cond = conditionals[nid]
             check_expr = _emit_check_expr(node, global_cfg, nodes_by_id)
-            lines.append(f'        report_node("{nid}", "running")')
-            lines.append(f'        print("--- {nid}: {node.label} ---")')
-            lines.append(f"        if {check_expr}:")
+            pad = "    " * foreach_indent
+            inner_pad_n = foreach_indent + 1
+            lines.append(f'{pad}report_node("{nid}", "running")')
+            lines.append(f'{pad}print("--- {nid}: {node.label} ---")')
+            lines.append(f"{pad}if {check_expr}:")
 
             if cond["true"]:
                 true_node = nodes_by_id[cond["true"]]
-                true_lines = _emit_node(true_node, global_cfg, nodes_by_id, indent=3, log_file_path=log_file_path)
+                true_lines = _emit_node(true_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path)
                 lines.extend(true_lines)
                 emitted.add(cond["true"])
             else:
-                lines.append("            pass")
+                lines.append(f"{'    ' * inner_pad_n}pass")
 
             if cond["false"]:
-                lines.append("        else:")
+                lines.append(f"{pad}else:")
                 false_node = nodes_by_id[cond["false"]]
-                false_lines = _emit_node(false_node, global_cfg, nodes_by_id, indent=3, log_file_path=log_file_path)
+                false_lines = _emit_node(false_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path)
                 lines.extend(false_lines)
                 emitted.add(cond["false"])
 
@@ -697,11 +722,15 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         # Case 3: Regular sequential node (skip standalone Check nodes that were
         # already handled as conditionals or loop headers)
         if nid not in loop_members:
-            node_lines = _emit_node(node, global_cfg, nodes_by_id, indent=2, log_file_path=log_file_path)
+            node_lines = _emit_node(node, global_cfg, nodes_by_id, indent=foreach_indent, log_file_path=log_file_path)
             lines.extend(node_lines)
             emitted.add(nid)
 
         i += 1
+
+    # Close ForEach loop with success report
+    if foreach_node_id:
+        lines.append(f"        report_node({foreach_node_id!r}, 'success')")
 
     # Add blank line and __main__ block
     lines.append("")
