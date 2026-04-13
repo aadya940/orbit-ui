@@ -456,11 +456,12 @@ def _emit_check_expr(
 ) -> str:
     """Return the Python expression for a Check node (used in if/for)."""
     llm = _node_llm_expr(node, global_cfg)
-    max_steps = node.config.get("max_steps", 5)
+    max_steps = node.config.get("max_steps") or None
     condition = node.config.get("condition", "").strip()
     condition, is_fstr = _resolve_all(condition, nodes_by_id)
     q = "f" if is_fstr else ""
-    common = f"session=s, llm={llm}, max_steps={max_steps}"
+    steps_part = f", max_steps={max_steps}" if max_steps is not None else ""
+    common = f"session=s, llm={llm}{steps_part}"
     return f'await Check({q}"{condition}", {common}).check()'
 
 
