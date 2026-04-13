@@ -297,6 +297,11 @@ def _emit_pydantic_models(nodes: list[Node]) -> list[str]:
     return lines
 
 
+def _esc(s: str) -> str:
+    """Escape backslashes and double-quotes so the string is safe inside '\"...\"'."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _node_llm_expr(node: Node, global_cfg: GlobalConfig) -> str:
     """Return the Python expression for this node's llm= kwarg."""
     node_llm = node.config.get("llm")
@@ -351,6 +356,7 @@ def _emit_node(
     if node.type == "Navigate":
         target = node.config.get("target", "").strip()
         target, is_fstr = _resolve_all(target, nodes_by_id)
+        target = _esc(target)
         q = "f" if is_fstr else ""
         if node.output_schema:
             lines.append(f"{pad}_{node.id}_result = await Navigate(")
@@ -367,6 +373,7 @@ def _emit_node(
     elif node.type == "Do":
         task = node.config.get("task", "").strip()
         task, is_fstr = _resolve_all(task, nodes_by_id)
+        task = _esc(task)
         q = "f" if is_fstr else ""
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
@@ -385,6 +392,7 @@ def _emit_node(
     elif node.type == "Read":
         task = node.config.get("task", "").strip()
         task, is_fstr = _resolve_all(task, nodes_by_id)
+        task = _esc(task)
         q = "f" if is_fstr else ""
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
@@ -402,6 +410,7 @@ def _emit_node(
     elif node.type == "Fill":
         target = node.config.get("target", "").strip()
         target, is_fstr_target = _resolve_all(target, nodes_by_id)
+        target = _esc(target)
         raw_data = node.config.get("data", {})
         # Resolve secrets in data values
         resolved_data = {}
@@ -414,7 +423,7 @@ def _emit_node(
         is_fstr = is_fstr_target or is_fstr_data
         q = "f" if is_fstr else ""
         # Build data dict literal — use f-string for values that contain {…}
-        data_items = ", ".join(f"{k!r}: {q}\"{v}\"" for k, v in resolved_data.items())
+        data_items = ", ".join(f"{k!r}: {q}\"{_esc(v)}\"" for k, v in resolved_data.items())
         lines.append(f"{pad}_{node.id}_result = await Fill(")
         lines.append(f"{pad}    {q}\"{target}\",")
         lines.append(f"{pad}    data={{{data_items}}},")
@@ -426,6 +435,7 @@ def _emit_node(
         class_name = node.config.get("class_name", "CustomVerb").strip()
         task = node.config.get("task", "").strip()
         task, is_fstr = _resolve_all(task, nodes_by_id)
+        task = _esc(task)
         q = "f" if is_fstr else ""
         if node.output_schema:
             lines.append(f"{pad}_{node.id}_result = await {class_name}(")
@@ -459,6 +469,7 @@ def _emit_check_expr(
     max_steps = node.config.get("max_steps") or None
     condition = node.config.get("condition", "").strip()
     condition, is_fstr = _resolve_all(condition, nodes_by_id)
+    condition = _esc(condition)
     q = "f" if is_fstr else ""
     steps_part = f", max_steps={max_steps}" if max_steps is not None else ""
     common = f"session=s, llm={llm}{steps_part}"
