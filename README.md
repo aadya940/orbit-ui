@@ -1,53 +1,23 @@
 # Orbit Studio
 
-Visual workflow automation for any desktop app — not just the browser.
+Visual workflow automation for any desktop app, not just the browser.
 
-Built on [orbit-cua](https://github.com/aadya940/orbit), a computer-use automation library that uses AT-SPI + screenshots to interact with any GUI application.
+![demo](docs/demo.gif)
 
-## What it does
+## Why not n8n, Playwright, or UiPath?
 
-- **Visual workflow builder** — drag-and-drop nodes (Navigate, Do, Check, Fill, Read, Code, Agent) to build automation workflows
-- **Retry loops with verification** — Check nodes verify outcomes using LLM; loop-back edges retry with context until success or max iterations
-- **Any desktop app** — AT-SPI makes this work on legacy ERP, thick clients, government portals — anything with a GUI
-- **Run history & live logs** — every run is recorded; logs stream live to the UI
-- **File manager** — upload files into the VM, download outputs to your machine
-- **Secrets management** — API keys and credentials stored in SQLite, never exposed in the UI
-- **Any LLM** — LiteLLM-compatible model strings (`gemini-2.5-flash`, `openai/gpt-4o`, `anthropic/claude-3-5-sonnet`, etc.)
+n8n and Zapier only automate things that have APIs. Playwright only works in the browser. UiPath costs $15k/year and requires a Windows server. Orbit Studio uses AT-SPI, the Linux accessibility layer, which means it can interact with any GUI application at the OS level: SAP, Oracle Forms, legacy thick clients, government portals, internal tools built in 2003. If a human can click it, Orbit can automate it.
 
 ## Quick start
-
-**Prerequisites:** Docker Desktop
 
 ```bash
 git clone https://github.com/aadya940/orbit-ui.git
 cd orbit-ui
-cp .env.example .env
-# Edit .env and add your API key
+cp .env.example .env        # add your API key, then:
 docker compose up --build
 ```
 
-Then open:
-- **UI** → http://localhost:3000
-- **Desktop** → http://localhost:6080 (noVNC, see the VM running)
-
-## Architecture
-
-```
-┌─────────────────────────────────┐    ┌──────────────────────────────┐
-│  vm                             │    │  ui                          │
-│  Ubuntu 24.04 + XFCE + AT-SPI  │    │  React + nginx               │
-│  :6080  noVNC desktop           │    │  :3000                       │
-│  :7878  OculOS daemon           │    │                              │
-│  :8000  FastAPI backend         │    └──────────────────────────────┘
-└─────────────────────────────────┘
-         workspace/ (Docker volume)
-         ├── orbit.db        workflows, secrets, run history
-         ├── workflow.py     auto-generated before each run
-         ├── runs/           per-run log files
-         └── uploads/        files you copy into the VM
-```
-
-The `vm` service is the unit of scale — future multi-VM support via `docker compose up --scale vm=N`.
+Open the UI at `http://localhost:3000`. Watch the VM at `http://localhost:6080`.
 
 ## Node types
 
@@ -55,34 +25,42 @@ The `vm` service is the unit of scale — future multi-VM support via `docker co
 |------|-------------|
 | **Navigate** | Open a URL or launch an application |
 | **Do** | Perform a task described in plain English |
-| **Check** | Verify a condition is true/false (used for branching and retry loops) |
+| **Check** | Verify a condition (used for branching and retry loops) |
 | **Fill** | Fill a form with structured data |
 | **Read** | Extract structured data from the screen |
+| **ForEach** | Iterate over any Python iterable (CSV rows, JSON arrays, node output) |
 | **Code** | Run arbitrary Python inside the workflow |
 | **Agent** | Define a custom agent verb with its own prompt template |
 
-## Workflow example
+## How retry loops work
+
+Most RPA tools retry by blindly re-running the same action. Orbit retries with understanding. A Check node asks the LLM whether the goal was actually achieved. If it was not, the loop runs the action again with full context of what happened. You set the max iterations. This makes workflows resilient to slow pages, timing issues, and transient errors without writing any error handling code.
+
+## Architecture
 
 ```
-Navigate → "Open SAP"
-Do       → "Go to the purchase orders report for last month"
-Read     → Extract {vendor, amount, status} for each row
-Code     → Write results to /workspace/output.csv
+backend/    FastAPI + SQLite + orbit-cua (runs inside Docker VM)
+frontend/   React + Vite + React Flow (served via nginx)
 ```
 
-With a loop:
 ```
-Navigate → "Open the form"
-Do       → "Fill in the fields and submit"
-Check    → "Was the submission successful?"  ← loop back to Do if false (max 3×)
+workspace/ (Docker volume, persists across rebuilds)
+├── orbit.db       workflows, secrets, run history
+├── workflow.py    auto-generated before each run
+├── runs/          per-run log files
+└── uploads/       files you copy into the VM
 ```
 
-## Tech stack
+## Supported LLMs
 
-- **Backend** — FastAPI, SQLite, orbit-cua
-- **Frontend** — React, Vite, React Flow
-- **VM** — Ubuntu 24.04, XFCE4, Xvfb, AT-SPI, noVNC
-- **LLM** — Any LiteLLM-compatible provider
+Any [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) model string:
+
+```
+gemini-2.5-flash
+openai/gpt-4o
+anthropic/claude-3-5-sonnet-20241022
+openrouter/google/gemini-flash-1.5
+```
 
 ## License
 
