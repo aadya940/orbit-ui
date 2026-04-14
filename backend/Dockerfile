@@ -55,7 +55,7 @@ RUN python3.11 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN pip install --upgrade pip setuptools wheel websockify
-RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.12 python-dotenv pillow ddgs
+RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.13 python-dotenv pillow ddgs
 RUN pip install --retries 5 --timeout 60  fastapi uvicorn
 
 
