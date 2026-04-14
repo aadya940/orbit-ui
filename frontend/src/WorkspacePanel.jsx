@@ -248,6 +248,27 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
     setGraph((current) => ({ ...current, nodes: [...current.nodes, createNode(type)] }));
   };
 
+  // Returns true if adding source→target would create a cycle among sequential edges.
+  const _wouldCycle = (edges, source, target) => {
+    // BFS: can we reach source from target through existing sequential edges?
+    const adj = {};
+    for (const e of edges) {
+      if (e.type === 'loop_back') continue;
+      if (!adj[e.source]) adj[e.source] = [];
+      adj[e.source].push(e.target);
+    }
+    const queue = [target];
+    const visited = new Set();
+    while (queue.length) {
+      const cur = queue.shift();
+      if (cur === source) return true;
+      if (visited.has(cur)) continue;
+      visited.add(cur);
+      for (const next of (adj[cur] || [])) queue.push(next);
+    }
+    return false;
+  };
+
   const handleConnect = async (params) => {
     const sourceNode = graph.nodes.find((node) => node.id === params.source);
     const targetNode = graph.nodes.find((node) => node.id === params.target);
@@ -272,6 +293,12 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       edgeType = 'conditional_true';
     } else if (params.sourceHandle === 'false') {
       edgeType = 'conditional_false';
+    }
+
+    // Reject sequential edges that would create a cycle — catch it at draw time, not generate time.
+    if (edgeType !== 'loop_back' && _wouldCycle(graph.edges, params.source, params.target)) {
+      setStatus('❌ This connection would create a cycle. Draw the edge upward to create a retry loop instead.');
+      return;
     }
 
     const newEdge = {
