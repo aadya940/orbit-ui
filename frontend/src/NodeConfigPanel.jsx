@@ -368,7 +368,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
           <div style={styles.fieldGroup}>
             <label style={styles.label}>LLM override</label>
             <select style={styles.select} value={config.llm || ""} onChange={(e) => updateConfig("llm", e.target.value || null)}>
-              {LLM_OPTIONS.map((m) => (<option key={m} value={m}>{m || "(use global)"}</option>))}
+              {LLM_SUGGESTIONS.map((m) => (<option key={m} value={m}>{m || "(use global)"}</option>))}
             </select>
           </div>
         </>
