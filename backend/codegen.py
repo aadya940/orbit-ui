@@ -557,7 +557,8 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     if has_schema:
         lines.append("from pydantic import BaseModel")
 
-    verb_types = {n.type for n in nodes if n.type not in ("Code", "Agent")}
+    # ForEach generates a plain Python for-loop — no orbit class to import
+    verb_types = {n.type for n in nodes if n.type not in ("Code", "Agent", "ForEach")}
     verb_imports = sorted(verb_types)
     has_agent_nodes = any(n.type == "Agent" for n in nodes)
     if has_agent_nodes:
