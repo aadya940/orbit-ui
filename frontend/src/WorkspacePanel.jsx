@@ -254,10 +254,10 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
     let edgeType = 'sequential';
     let maxIterations = undefined;
 
-    const isBackEdge = sourceNode && targetNode && (
-      targetNode.position.y + 20 < sourceNode.position.y ||
-      targetNode.position.x + 20 < sourceNode.position.x
-    );
+    // Only treat as a back edge when the target is significantly above the source.
+    // Horizontal offset is ignored — nodes are often laid out left/right without implying a loop.
+    const isBackEdge = sourceNode && targetNode &&
+      targetNode.position.y + 100 < sourceNode.position.y;
 
     if (isBackEdge) {
       const raw = window.prompt('Loop back detected. Enter max iterations:', '3');
