@@ -50,6 +50,15 @@ RUN apt-get update && \
     rm google-chrome-stable_current_amd64.deb && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Docker blocks the kernel namespaces Chrome's sandbox requires — --no-sandbox
+# and --disable-dev-shm-usage are needed in every Docker environment regardless
+# of which user runs the container. Wrap the binary so all launch paths get the flags.
+RUN mv /usr/bin/google-chrome-stable /usr/bin/google-chrome-stable.real && \
+    printf '#!/bin/sh\nexec /usr/bin/google-chrome-stable.real --no-sandbox --disable-dev-shm-usage "$@"\n' \
+        > /usr/bin/google-chrome-stable && \
+    chmod +x /usr/bin/google-chrome-stable && \
+    ln -sf /usr/bin/google-chrome-stable /usr/bin/google-chrome
+
 ENV VIRTUAL_ENV=/opt/venv
 RUN python3.11 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
