@@ -190,9 +190,20 @@ def _topo_sort(
 
     if len(order) != len(node_ids):
         missing = node_ids - set(order)
+        node_labels = {n.id: (n.label or n.type or n.id) for n in nodes}
+        # Find the specific edges that form the cycle (edges between stuck nodes)
+        cycle_edges = [
+            f"{node_labels.get(e.source, e.source)!r} → {node_labels.get(e.target, e.target)!r}"
+            for e in non_loop_edges
+            if e.source in missing and e.target in missing
+        ]
+        detail = (
+            f" Cycle edges: {cycle_edges}." if cycle_edges
+            else " Check for edges connecting nodes in a circle."
+        )
         raise CodegenError(
-            f"Graph has a cycle that is not a loop_back edge. "
-            f"Unreachable nodes: {missing}"
+            f"Graph has a cycle. Delete the edge that loops back, or mark it "
+            f"as a loop_back edge by drawing it from a lower node to a higher one.{detail}"
         )
 
     # Fill loop body lists
