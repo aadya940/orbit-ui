@@ -8,7 +8,7 @@ services:
       - "7878:7878"   # OculOS daemon
       - "8000:8000"   # FastAPI backend
     volumes:
-      - chrome-profile:/home/computeruse/.config/google-chrome
+      - chrome-profile:/root/.config/google-chrome
       - workspace:/workspace
     env_file:
       - .env
