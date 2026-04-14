@@ -54,7 +54,7 @@ RUN apt-get update && \
 # and --disable-dev-shm-usage are needed in every Docker environment regardless
 # of which user runs the container. Wrap the binary so all launch paths get the flags.
 RUN mv /usr/bin/google-chrome-stable /usr/bin/google-chrome-stable.real && \
-    printf '#!/bin/sh\nexec /usr/bin/google-chrome-stable.real --no-sandbox --disable-dev-shm-usage "$@"\n' \
+    printf '#!/bin/sh\n# Clear stale profile lock left by previous container instance\nrm -f /root/.config/google-chrome/SingletonLock \\\n      /root/.config/google-chrome/SingletonCookie \\\n      /root/.config/google-chrome/SingletonSocket\nexec /usr/bin/google-chrome-stable.real --no-sandbox --disable-dev-shm-usage "$@"\n' \
         > /usr/bin/google-chrome-stable && \
     chmod +x /usr/bin/google-chrome-stable && \
     ln -sf /usr/bin/google-chrome-stable /usr/bin/google-chrome
