@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-const FIELD_TYPES = ["str", "int", "float", "bool"];
+const FIELD_TYPES = ["str", "int", "float", "bool", "list[str]", "list[int]", "list[float]"];
 
 const styles = {
   container: { marginTop: 8 },
@@ -33,7 +33,7 @@ const styles = {
     borderRadius: 4,
   },
   typeSelect: {
-    width: 60,
+    width: 90,
     fontSize: 11,
     padding: "3px 2px",
     border: "1px solid #ddd",

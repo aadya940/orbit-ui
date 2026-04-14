@@ -27,11 +27,12 @@ class SchemaField:
     name: str
     type: str  # "str" | "int" | "float" | "bool"
 
-    VALID_TYPES = {"str", "int", "float", "bool"}
+    VALID_TYPES = {"str", "int", "float", "bool", "list[str]", "list[int]", "list[float]"}
 
     def python_type(self) -> str:
         if self.type not in self.VALID_TYPES:
             raise CodegenError(f"Unknown schema field type: {self.type!r}")
+        # Python 3.9+ supports list[str] natively in type hints
         return self.type
 
 
