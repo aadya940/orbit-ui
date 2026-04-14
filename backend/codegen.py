@@ -193,7 +193,7 @@ def _topo_sort(
         node_labels = {n.id: (n.label or n.type or n.id) for n in nodes}
         # Find the specific edges that form the cycle (edges between stuck nodes)
         cycle_edges = [
-            f"{node_labels.get(e.source, e.source)!r} → {node_labels.get(e.target, e.target)!r}"
+            f"{node_labels.get(e.source, e.source)!r} ({e.source}) → {node_labels.get(e.target, e.target)!r} ({e.target})"
             for e in non_loop_edges
             if e.source in missing and e.target in missing
         ]
