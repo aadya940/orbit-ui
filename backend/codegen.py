@@ -328,13 +328,17 @@ def _emit_node(
     nodes_by_id: dict[str, Node],
     indent: int = 2,
     log_file_path: str | None = None,
+    prev_output_var: str | None = None,
 ) -> list[str]:
     """Emit Python lines for a single node."""
     pad = "    " * indent
     lines = []
     llm = _node_llm_expr(node, global_cfg)
     max_steps = node.config.get("max_steps") or None
-    extra_info = node.config.get("extra_info")
+    # Explicit extra_info from config takes priority; otherwise pipe previous node's output
+    extra_info = node.config.get("extra_info") or (
+        f"{{str({prev_output_var})}}" if prev_output_var else None
+    )
 
     if node.type == "Code":
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
@@ -362,8 +366,12 @@ def _emit_node(
         if max_steps is not None:
             common += f", max_steps={max_steps}"
 
-    if extra_info and node.type in ("Do", "Navigate"):
-        common += f", extra_info={extra_info!r}"
+    if extra_info and node.type in ("Do", "Navigate", "Read", "Fill", "Agent"):
+        # prev_output_var injection uses {str(...)} — emit as f-string, manual extra_info as plain string
+        if extra_info.startswith("{") and extra_info.endswith("}"):
+            common += f", extra_info=f\"{extra_info}\""
+        else:
+            common += f", extra_info={extra_info!r}"
 
     if node.type == "Navigate":
         target = node.config.get("target", "").strip()
@@ -630,6 +638,7 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     emitted: set[str] = set()
     foreach_indent = 2   # bumped to 3 once a ForEach node is emitted
     foreach_node_id: str | None = None
+    prev_output_var: str | None = None  # last node output var to auto-pipe via extra_info
     i = 0
     while i < len(order):
         nid = order[i]
@@ -664,21 +673,29 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
                 # Pattern A: Check is the loop header (check-first retry)
                 for body_nid in lg.body:
                     body_node = nodes_by_id[body_nid]
-                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
+                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
+                    if body_node.output_schema:
+                        prev_output_var = f"{body_nid}_out"
                     emitted.add(body_nid)
 
                 if tail_node.type != "Check":
-                    lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
+                    lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
+                    if tail_node.output_schema:
+                        prev_output_var = f"{lg.tail}_out"
                 emitted.add(lg.tail)
 
                 check_node, check_nid = node, nid
             else:
                 # Pattern B: Non-Check header (e.g. Navigate → Check).
-                lines.extend(_emit_node(node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
+                lines.extend(_emit_node(node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
+                if node.output_schema:
+                    prev_output_var = f"{nid}_out"
 
                 for body_nid in lg.body:
                     body_node = nodes_by_id[body_nid]
-                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path))
+                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
+                    if body_node.output_schema:
+                        prev_output_var = f"{body_nid}_out"
                     emitted.add(body_nid)
 
                 if tail_node.type != "Check":
@@ -726,8 +743,10 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
 
             if cond["true"]:
                 true_node = nodes_by_id[cond["true"]]
-                true_lines = _emit_node(true_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path)
+                true_lines = _emit_node(true_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var)
                 lines.extend(true_lines)
+                if true_node.output_schema:
+                    prev_output_var = f"{cond['true']}_out"
                 emitted.add(cond["true"])
             else:
                 lines.append(f"{'    ' * inner_pad_n}pass")
@@ -735,8 +754,10 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
             if cond["false"]:
                 lines.append(f"{pad}else:")
                 false_node = nodes_by_id[cond["false"]]
-                false_lines = _emit_node(false_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path)
+                false_lines = _emit_node(false_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var)
                 lines.extend(false_lines)
+                if false_node.output_schema:
+                    prev_output_var = f"{cond['false']}_out"
                 emitted.add(cond["false"])
 
             emitted.add(nid)
@@ -746,8 +767,10 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         # Case 3: Regular sequential node (skip standalone Check nodes that were
         # already handled as conditionals or loop headers)
         if nid not in loop_members:
-            node_lines = _emit_node(node, global_cfg, nodes_by_id, indent=foreach_indent, log_file_path=log_file_path)
+            node_lines = _emit_node(node, global_cfg, nodes_by_id, indent=foreach_indent, log_file_path=log_file_path, prev_output_var=prev_output_var)
             lines.extend(node_lines)
+            if node.output_schema:
+                prev_output_var = f"{nid}_out"
             emitted.add(nid)
 
         i += 1
