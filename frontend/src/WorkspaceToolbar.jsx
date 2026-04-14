@@ -6,10 +6,11 @@ const ADD_NODES = [
   ['Read', '#0891b2'],
   ['Code', '#6b7280'],
   ['Agent', '#7c3aed'],
+  ['ForEach', '#f59e0b'],
 ];
 
 const TYPE_ICONS = {
-  Navigate: '→', Do: '⚡', Check: '✓', Fill: '≡', Read: '»', Code: '</>', Agent: '◈',
+  Navigate: '→', Do: '⚡', Check: '✓', Fill: '≡', Read: '»', Code: '</>', Agent: '◈', ForEach: '∀',
 };
 
 export default function WorkspaceToolbar({ onAddNode, onSave, onGenerate, onPreview, onStart, status, disabled, running }) {
