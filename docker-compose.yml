@@ -9,7 +9,7 @@ services:
       - "8000:8000"   # FastAPI backend
     volumes:
       - chrome-profile:/root/.config/google-chrome
-      - workspace:/workspace
+      - ./workspace:/workspace
     env_file:
       - .env
     restart: unless-stopped
@@ -30,4 +30,3 @@ services:
 
 volumes:
   chrome-profile:
-  workspace:
