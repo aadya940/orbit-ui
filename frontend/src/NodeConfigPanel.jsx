@@ -336,6 +336,12 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
               <input style={styles.numberInput} type="number" min={1} max={100} value={config.max_steps ?? ''} placeholder="unlimited" onChange={(e) => updateConfig("max_steps", e.target.value === '' ? null : parseInt(e.target.value) || null)} />
             </div>
           )}
+          {showMaxSteps && (
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>Timeout (seconds)</label>
+              <input style={styles.numberInput} type="number" min={10} value={config.timeout ?? ''} placeholder="none" onChange={(e) => updateConfig("timeout", e.target.value === '' ? null : parseInt(e.target.value) || null)} />
+            </div>
+          )}
           {showExtraInfo && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>Extra info (optional)</label>
