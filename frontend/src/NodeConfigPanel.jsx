@@ -342,6 +342,12 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
               <textarea style={styles.textarea} value={config.extra_info || ""} onChange={(e) => updateConfig("extra_info", e.target.value)} placeholder="Advisory context for the agent..." />
             </div>
           )}
+          {showExtraInfo && (
+            <div style={{ ...styles.fieldGroup, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" id="planner-toggle" checked={!!config.planner} onChange={(e) => updateConfig("planner", e.target.checked)} />
+              <label htmlFor="planner-toggle" style={{ ...styles.label, marginBottom: 0, cursor: 'pointer' }}>Use planner (multi-step tasks)</label>
+            </div>
+          )}
           {nodeType !== "Code" && nodeType !== "ForEach" && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>LLM override</label>
