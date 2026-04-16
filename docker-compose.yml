@@ -3,6 +3,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    shm_size: '2gb'
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
     ports:
       - "6080:6080"   # noVNC WebSocket
       - "7878:7878"   # OculOS daemon
@@ -12,6 +17,8 @@ services:
       - ./workspace:/workspace
     env_file:
       - .env
+    environment:
+      - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/google-chrome
     restart: unless-stopped
     # Future: to run N parallel VMs, extract backend.py to its own service,
     # then scale this service: docker compose up --scale vm=N
@@ -22,6 +29,11 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: http://localhost:8000
+    shm_size: '2gb'
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
     ports:
       - "3000:80"
     depends_on:
@@ -30,3 +42,4 @@ services:
 
 volumes:
   chrome-profile:
+
