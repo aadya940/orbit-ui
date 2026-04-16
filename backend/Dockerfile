@@ -64,7 +64,7 @@ RUN python3.11 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN pip install --upgrade pip setuptools wheel websockify
-RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.21 python-dotenv pillow ddgs pandas
+RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.22 python-dotenv pillow ddgs pandas
 RUN pip install --retries 5 --timeout 60 fastapi uvicorn playwright
 RUN playwright install chromium --with-deps
 
@@ -95,17 +95,29 @@ RUN mkdir -p /workspace
 
 EXPOSE 7878 6080 8000
 
-# Start sequence wrapped in dbus-run-session so desktop and Orbit share
-# the same D-Bus session and AT-SPI accessibility tree.
-# at-spi paths are /usr/libexec/ on Ubuntu 24.04 (not /usr/lib/at-spi2-core/)
-CMD ["sh", "-c", "rm -rf /root/.cache/at-spi /tmp/dbus-* && dbus-run-session -- sh -c '\
-  Xvfb :99 -screen 0 1280x768x24 -ac & \
-  sleep 2 && DISPLAY=:99 xfce4-session & \
-  sleep 3 && DISPLAY=:99 /usr/libexec/at-spi-bus-launcher --launch-immediately & \
-  sleep 1 && DISPLAY=:99 /usr/libexec/at-spi2-registryd & \
-  sleep 3 && x11vnc -display :99 -nopw -forever -shared -rfbport 5900 & \
-  sleep 1 && websockify 6080 localhost:5900 & \
-  until DISPLAY=:99 xdpyinfo >/dev/null 2>&1; do sleep 1; done && \
-  echo Desktop ready && \
-  sleep 5 && DISPLAY=:99 python /app/backend.py \
-'"]
+# Start sequence:
+# 1. Nuke any stale singleton locks from the mounted chrome-profile volume FIRST,
+#    before dbus-run-session, so they're always cleared even if dbus setup fails.
+#    (Playwright uses its own Chromium binary, not the wrapper above, so we must
+#     do this cleanup here rather than relying on the wrapper script.)
+# 2. Gate on Xvfb actually accepting connections before starting the WM.
+# 3. Gate on the WM being ready before starting Python — avoids Chrome SIGTRAP
+#    when it tries to create a window before the WM is initialized.
+CMD ["sh", "-c", "\
+  rm -f /root/.config/google-chrome/SingletonLock \
+        /root/.config/google-chrome/SingletonCookie \
+        /root/.config/google-chrome/SingletonSocket && \
+  rm -rf /root/.cache/at-spi /tmp/dbus-* && \
+  dbus-run-session -- sh -c '\
+    Xvfb :99 -screen 0 1280x768x24 -ac & \
+    until DISPLAY=:99 xdpyinfo >/dev/null 2>&1; do sleep 1; done && \
+    DISPLAY=:99 xfce4-session & \
+    DISPLAY=:99 /usr/libexec/at-spi-bus-launcher --launch-immediately & \
+    DISPLAY=:99 /usr/libexec/at-spi2-registryd & \
+    x11vnc -display :99 -nopw -forever -shared -rfbport 5900 & \
+    websockify 6080 localhost:5900 & \
+    until DISPLAY=:99 wmctrl -m >/dev/null 2>&1; do sleep 1; done && \
+    echo \"Desktop ready\" && \
+    DISPLAY=:99 python /app/backend.py \
+  '"]
+  
