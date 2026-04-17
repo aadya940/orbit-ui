@@ -9,6 +9,7 @@ const TYPE_META = {
   Read:     { icon: '»',  color: '#0891b2' },
   Code:     { icon: '</>', color: '#6b7280' },
   Agent:    { icon: '◈',  color: '#7c3aed' },
+  Security: { icon: '🛡️', color: '#dc2626' },
 };
 
 const handle = {
