@@ -783,6 +783,14 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     if foreach_node_id:
         lines.append(f"        report_node({foreach_node_id!r}, 'success')")
 
+    lines.append("        report_node('__workflow__', 'success')")
+    lines.append("        print('Workflow completed. Holding screen open... (Click Stop in UI to exit)')")
+    lines.append("        try:")
+    lines.append("            while True:")
+    lines.append("                await asyncio.sleep(1)")
+    lines.append("        except asyncio.CancelledError:")
+    lines.append("            pass")
+
     # Add blank line and __main__ block
     lines.append("")
     lines.append("")

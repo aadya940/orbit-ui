@@ -63,9 +63,14 @@ export default function App() {
     setPaused(false);
   }, []);
 
-  const handleWorkflowEnd = useCallback(() => {
-    setTaskStatus('pending');
-    setPaused(false);
+const handleWorkflowEnd = useCallback((status) => {
+      if (status === 'success') {
+        setTaskStatus('finished');
+        setPaused(true);
+      } else {
+        setTaskStatus('pending');
+        setPaused(false);
+      }
   }, []);
 
   return (
@@ -287,18 +292,19 @@ export default function App() {
                 <div className="status-row">
                   <span className={`status-dot ${paused ? 'paused' : taskStatus}`} />
                   <span className="status-label">
-                    {paused ? "You're in control" : taskStatus === 'running' ? 'Agent running' : 'Idle'}
+                      {paused ? "You're in control" : taskStatus === 'running' ? 'Agent running' : taskStatus === 'finished' ? 'Agent finished' : 'Idle'}
+                    </span>
+                  </div>
+                  <span className="task-sublabel">
+                    {paused ? (taskStatus === 'finished' ? 'Workflow complete' : 'Agent paused') : taskStatus === 'pending' ? 'No workflow started' : 'Autonomous mode'}
                   </span>
                 </div>
-                <span className="task-sublabel">
-                  {paused ? 'Agent paused' : taskStatus === 'pending' ? 'No workflow started' : 'Autonomous mode'}
-                </span>
-              </div>
-
               <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     className={`take-over-btn ${paused ? 'user-control' : 'agent-running'}`}
                     onClick={handleTakeOver}
+                      disabled={taskStatus === 'finished'}
+                      style={taskStatus === 'finished' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
                       {paused
@@ -308,7 +314,7 @@ export default function App() {
                     </svg>
                     {paused ? 'Hand Back' : 'Take Over'}
                   </button>
-                  {taskStatus === 'running' && (
+                  {(taskStatus === 'running' || taskStatus === 'finished') && (
                     <button
                       onClick={handleStop}
                       style={{

@@ -359,7 +359,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       } else if (data.type === 'snapshot') {
         setNodeStatuses(data.statuses || {});
       } else if (data.node_id === '__workflow__') {
-        const terminal = data.status === 'success' || data.status === 'error' || data.status === 'stopped';
+        const terminal = data.status === 'error' || data.status === 'stopped';
         if (terminal) { es.close(); onWorkflowEnd?.(data.status); fetchRuns(currentWorkflowId); }
       } else if (data.node_id) {
         setNodeStatuses(prev => ({ ...prev, [data.node_id]: data.status }));

@@ -343,7 +343,7 @@ async def start(id: str | None = None):
         final_status = "success"
         try:
             await _wf.main(pause_event=pause_event)
-            _state.report_node("__workflow__", "success")
+            # _state.report_node("__workflow__", "success")
         except asyncio.CancelledError:
             final_status = "stopped"
             _state.report_node("__workflow__", "stopped")
