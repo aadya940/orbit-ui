@@ -1,67 +1,125 @@
 # Orbit Studio
 
-Visual workflow automation for any desktop app, not just the browser.
+Build browser automation workflows visually. Connect nodes, run an AI agent, watch it work in a real browser — then schedule it to run on its own.
 
-![demo](docs/demo.gif)
 
-## Why not n8n, Playwright, or UiPath?
+---
 
-n8n and Zapier only automate things that have APIs. Playwright only works in the browser. UiPath costs $15k/year and requires a Windows server. Orbit Studio uses AT-SPI, the Linux accessibility layer, which means it can interact with any GUI application at the OS level: SAP, Oracle Forms, legacy thick clients, government portals, internal tools built in 2003. If a human can click it, Orbit can automate it.
+## What it's for
+
+- **Job applications** — navigate LinkedIn, filter listings, fill and submit applications automatically
+- **Web scraping** — extract structured data from any page into JSON or CSV
+- **Form automation** — log in, fill forms, submit — using credentials from an encrypted vault
+- **Monitoring** — check pages on a schedule, branch on conditions, retry until something changes
+- **Batch processing** — iterate over a CSV row by row, perform an action per item
+
+---
+
+## How it works
+
+You build a workflow as a graph of nodes — Navigate, Do, Read, Fill, Check, ForEach, Code. The agent executes each step in a sandboxed VM with a real browser. You watch it happen live, can take over manually at any point, and hand back when you're done.
+
+Trigger workflows manually, via webhook, or on a cron schedule.
+
+---
 
 ## Quick start
 
 ```bash
-git clone https://github.com/aadya940/orbit-ui.git
-cd orbit-ui
-cp .env.example .env        # add your API key, then:
-docker compose up --build
+git clone https://github.com/your-org/orbit-studio
+cd orbit-studio
+
+cp .env.example .env
+# Add your GEMINI_API_KEY (or any supported LLM key)
+
+docker compose up
 ```
 
-Open the UI at `http://localhost:3000`. Watch the VM at `http://localhost:6080`.
+Open **http://localhost:3000**
 
-## Node types
+---
+
+## Nodes
 
 | Node | What it does |
 |------|-------------|
-| **Navigate** | Open a URL or launch an application |
-| **Do** | Perform a task described in plain English |
-| **Check** | Verify a condition (used for branching and retry loops) |
-| **Fill** | Fill a form with structured data |
-| **Read** | Extract structured data from the screen |
-| **ForEach** | Iterate over any Python iterable (CSV rows, JSON arrays, node output) |
-| **Code** | Run arbitrary Python inside the workflow |
-| **Agent** | Define a custom agent verb with its own prompt template |
+| `Navigate` | Open a URL |
+| `Do` | Describe an action in plain English |
+| `Read` | Extract structured data from the page |
+| `Fill` | Fill a form with field → value pairs |
+| `Check` | Branch on a yes/no condition |
+| `ForEach` | Iterate over a list |
+| `Code` | Run Python inline |
+| `Agent` | Custom verb with your own prompt template |
 
-## How retry loops work
+---
 
-Most RPA tools retry by blindly re-running the same action. Orbit retries with understanding. A Check node asks the LLM whether the goal was actually achieved. If it was not, the loop runs the action again with full context of what happened. You set the max iterations. This makes workflows resilient to slow pages, timing issues, and transient errors without writing any error handling code.
+## Features
 
-## Architecture
+**Workflow inputs** — declare parameters like `job_url` or `email`, reference them as `{{inputs.job_url}}` in any node. Pass values at run time via the UI, webhook, or cron.
 
-```
-backend/    FastAPI + SQLite + orbit-cua (runs inside Docker VM)
-frontend/   React + Vite + React Flow (served via nginx)
-```
-
-```
-workspace/ (Docker volume, persists across rebuilds)
-├── orbit.db       workflows, secrets, run history
-├── workflow.py    auto-generated before each run
-├── runs/          per-run log files
-└── uploads/       files you copy into the VM
+**Webhook triggers** — every workflow gets a stable endpoint:
+```bash
+curl -X POST http://localhost:8000/webhook/{workflow_id} \
+  -H "Content-Type: application/json" \
+  -d '{"job_url": "https://example.com/jobs/123"}'
 ```
 
-## Supported LLMs
+**Cron scheduling** — set expressions like `0 9 * * 1-5` in the Triggers panel. The scheduler fires them automatically.
 
-Any [LiteLLM-compatible](https://docs.litellm.ai/docs/providers) model string:
-
+**Multi-LLM** — use any model via LiteLLM. Set globally or override per node:
 ```
-gemini-2.5-flash
-openai/gpt-4o
-anthropic/claude-3-5-sonnet-20241022
-openrouter/google/gemini-flash-1.5
+gemini-3-flash-preview  |  openai/gpt-4o  |  anthropic/claude-3-5-sonnet-20241022
+openrouter/...          |  ollama/llama3
 ```
 
-## License
+**Secrets vault** — store API keys and passwords, reference as `{{secrets.KEY}}`. Never returned by the API after saving.
 
-MIT
+**MCP servers** — attach any MCP tool server to a node (stdio or SSE). Gives the agent file system access, database queries, custom APIs.
+
+**Run history** — every run is logged. Stream logs live, or browse past runs and their outputs.
+
+**Take Over** — pause the agent mid-run, control the browser yourself, hand back. The agent resumes from where it left off.
+
+---
+
+## Supported LLM keys
+
+| Provider | Secret key |
+|----------|-----------|
+| Gemini (default) | `GEMINI_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+| Ollama | no key needed |
+
+Add keys in the Secrets panel (lock icon in the top bar) or in your `.env`.
+
+---
+
+## Data persistence
+
+All workflows, logs, secrets, and uploaded files live in `./workspace` — a bind-mounted directory that persists across restarts and rebuilds.
+
+```bash
+# Backup
+cp -r ./workspace ./workspace-backup
+
+# Upgrade
+git pull && docker compose up --build
+```
+
+---
+
+## Ports
+
+| Port | Service |
+|------|---------|
+| `3000` | Frontend |
+| `8000` | Backend API |
+| `6080` | noVNC (VM viewer) |
+| `7878` | OculOS daemon |
+
+---
+
+Built on [orbit-cua](https://pypi.org/project/orbit-cua/) · [PyPI](https://pypi.org/project/orbit-cua/)

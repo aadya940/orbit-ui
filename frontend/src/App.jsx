@@ -41,9 +41,13 @@ export default function App() {
     window.addEventListener('mouseup', onMouseUp);
   }, [rightWidth]);
 
-  const handleStart = useCallback(async (workflowId = null) => {
+  const handleStart = useCallback(async (workflowId = null, inputs = {}) => {
     const url = workflowId ? `${API}/start?id=${workflowId}` : `${API}/start`;
-    await fetch(url, { method: 'POST' });
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputs }),
+    });
     setTaskStatus('running');
     setPaused(false);
   }, []);

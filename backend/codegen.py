@@ -337,6 +337,19 @@ def _topo_sort(
 # ── Template substitution ────────────────────────────────────────────────────
 
 _SECRETS_RE = re.compile(r"\{\{secrets\.(\w+)\}\}", re.IGNORECASE)
+_INPUTS_RE  = re.compile(r"\{\{inputs\.(\w+)\}\}", re.IGNORECASE)
+
+
+def _resolve_inputs(text: str) -> tuple[str, bool]:
+    """Replace {{inputs.KEY}} with {_inputs.get('KEY', '')}.
+
+    Returns (resolved_text, uses_fstring).
+    """
+    has_input = bool(_INPUTS_RE.search(text))
+    resolved = _INPUTS_RE.sub(
+        lambda m: "{_inputs.get('" + m.group(1) + "', '')}", text
+    )
+    return resolved, has_input
 
 
 def _resolve_secrets(text: str) -> tuple[str, bool]:
@@ -356,7 +369,8 @@ _BARE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 def _resolve_all(text: str, nodes_by_id: dict[str, Node]) -> tuple[str, bool]:
-    """Run both secrets and node-template resolution. Returns (text, uses_fstring)."""
+    """Run inputs, secrets, and node-template resolution. Returns (text, uses_fstring)."""
+    text, is_input  = _resolve_inputs(text)   # must be before _resolve_templates (inputs.X matches TEMPLATE_RE)
     text, is_secret = _resolve_secrets(text)
     text, is_template = _resolve_templates(text, nodes_by_id)
     # Also resolve bare {{var}} (loop variables like {{item}})
@@ -364,7 +378,7 @@ def _resolve_all(text: str, nodes_by_id: dict[str, Node]) -> tuple[str, bool]:
     if bare_count:
         text = bare_result
         is_template = True
-    return text, (is_secret or is_template)
+    return text, (is_input or is_secret or is_template)
 
 
 def _resolve_templates(text: str, nodes_by_id: dict[str, Node]) -> tuple[str, bool]:
@@ -928,7 +942,7 @@ def _emit_subgraph(
 # ── Main generation ──────────────────────────────────────────────────────────
 
 
-def generate(graph_data: dict, log_file_path: str | None = None) -> str:
+def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | None = None) -> str:
     """Generate workflow.py source code from graph JSON."""
     global_cfg, nodes, edges = parse_graph(graph_data)
     nodes_by_id = {n.id: n for n in nodes}
@@ -1031,6 +1045,7 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     else:
         lines.append("from orbit import session")
     lines.append("from state import pause_event, report_node, report_node_output")
+    lines.append(f"_inputs = {repr(inputs or {})}")
     lines.append("")
     if log_file_path:
         lines.append(f"_LOG_FILE = {log_file_path!r}")

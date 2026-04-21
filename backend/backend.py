@@ -13,7 +13,8 @@ import time
 import uuid
 from pathlib import Path
 import mimetypes
-from fastapi import FastAPI, HTTPException, UploadFile, File
+import datetime
+from fastapi import FastAPI, HTTPException, UploadFile, File, Body, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
@@ -135,7 +136,9 @@ def init_db() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    scheduler = asyncio.create_task(_scheduler_loop())
     yield
+    scheduler.cancel()
     if agent_task and not agent_task.done():
         agent_task.cancel()
 
@@ -345,36 +348,30 @@ async def events():
 # ── Agent control endpoints ───────────────────────────────────────────────────
 
 
-@app.post("/start")
-async def start(id: str | None = None):
+async def _run_workflow(workflow_id: str, inputs: dict | None = None) -> dict:
+    """Core workflow execution — shared by /start, /webhook, and the cron scheduler."""
     global agent_task, _current_run_id
+
     if agent_task and not agent_task.done():
         return {"status": "already_running"}
 
-    # Always regenerate workflow.py from current workflow before running
     with _db() as con:
-        if id:
-            row = con.execute(
-                "SELECT id, name, graph FROM workflows WHERE id=?", (id,)
-            ).fetchone()
-        else:
-            row = con.execute(
-                "SELECT id, name, graph FROM workflows ORDER BY updated DESC LIMIT 1"
-            ).fetchone()
+        row = con.execute(
+            "SELECT id, name, graph FROM workflows WHERE id=?", (workflow_id,)
+        ).fetchone()
 
     if not row:
-        return {"status": "error", "message": "No workflow found. Create one first."}
+        return {"status": "error", "message": "Workflow not found."}
 
-    workflow_id = row["id"]
+    wid = row["id"]
     workflow_name = row["name"]
-
     run_id = str(uuid.uuid4())
     log_path = f"/workspace/runs/{run_id}.log"
     Path("/workspace/runs").mkdir(parents=True, exist_ok=True)
 
     try:
         graph_data = json.loads(row["graph"])
-        code = generate(graph_data, log_file_path=log_path)
+        code = generate(graph_data, log_file_path=log_path, inputs=inputs or {})
         WORKFLOW_PY.write_text(code)
     except Exception as e:
         return {"status": "error", "message": f"Code generation failed: {e}"}
@@ -382,15 +379,7 @@ async def start(id: str | None = None):
     with _db() as con:
         con.execute(
             "INSERT INTO runs VALUES (?,?,?,?,?,?,?)",
-            (
-                run_id,
-                workflow_id,
-                workflow_name,
-                time.time(),
-                None,
-                "running",
-                log_path,
-            ),
+            (run_id, wid, workflow_name, time.time(), None, "running", log_path),
         )
     _current_run_id = run_id
 
@@ -406,7 +395,6 @@ async def start(id: str | None = None):
         final_status = "success"
         try:
             await _wf.main(pause_event=pause_event)
-            # _state.report_node("__workflow__", "success")
         except asyncio.CancelledError:
             final_status = "stopped"
             _state.report_node("__workflow__", "stopped")
@@ -425,7 +413,84 @@ async def start(id: str | None = None):
                     )
 
     agent_task = asyncio.create_task(_run())
-    return {"status": "started"}
+    return {"status": "started", "run_id": run_id}
+
+
+@app.post("/start")
+async def start(id: str | None = None, payload: dict | None = Body(default=None)):
+    inputs = (payload or {}).get("inputs", {})
+
+    if id:
+        return await _run_workflow(id, inputs)
+
+    # Default to most recently updated workflow
+    with _db() as con:
+        row = con.execute(
+            "SELECT id FROM workflows ORDER BY updated DESC LIMIT 1"
+        ).fetchone()
+    if not row:
+        return {"status": "error", "message": "No workflow found. Create one first."}
+    return await _run_workflow(row["id"], inputs)
+
+
+@app.post("/webhook/{workflow_id}")
+async def webhook_trigger(
+    workflow_id: str,
+    payload: dict | None = Body(default=None),
+    x_orbit_secret: str | None = Header(default=None),
+):
+    """Trigger a workflow run via HTTP. Request body is passed as workflow inputs."""
+    # Validate webhook secret if configured on the workflow
+    with _db() as con:
+        row = con.execute(
+            "SELECT graph FROM workflows WHERE id=?", (workflow_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    graph_data = json.loads(row["graph"])
+    expected_secret = graph_data.get("global", {}).get("webhook_secret", "")
+    if expected_secret and x_orbit_secret != expected_secret:
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    inputs = payload or {}
+    return await _run_workflow(workflow_id, inputs)
+
+
+# ── Cron scheduler ────────────────────────────────────────────────────────────
+
+async def _scheduler_loop():
+    """Check every 60s for cron triggers that are due and fire them."""
+    try:
+        from croniter import croniter
+    except ImportError:
+        return  # croniter not installed — skip scheduling
+
+    while True:
+        await asyncio.sleep(60)
+        try:
+            now = datetime.datetime.now()
+            with _db() as con:
+                rows = con.execute("SELECT id, graph FROM workflows").fetchall()
+            for row in rows:
+                graph_data = json.loads(row["graph"])
+                triggers = graph_data.get("global", {}).get("triggers", [])
+                for t in triggers:
+                    if not t.get("enabled", True):
+                        continue
+                    if t.get("type") != "cron":
+                        continue
+                    cron_expr = t.get("cron", "").strip()
+                    if not cron_expr:
+                        continue
+                    try:
+                        if croniter.match(cron_expr, now):
+                            inputs = t.get("inputs", {})
+                            await _run_workflow(row["id"], inputs)
+                    except Exception:
+                        pass  # malformed cron expression — skip
+        except Exception:
+            pass  # never crash the scheduler loop
 
 
 @app.get("/runs")

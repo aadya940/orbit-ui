@@ -153,6 +153,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   const [filePath, setFilePath] = useState('');
   const [fileEntries, setFileEntries] = useState([]);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [inputsModal, setInputsModal] = useState(null); // {fields: [...], values: {...}}
   const [errorToast, setErrorToast] = useState(null);
   const errorToastTimer = useRef(null);
   const autosaveTimer = useRef(null);
@@ -449,10 +450,10 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
     }
   };
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (inputs = {}) => {
     setNodeStatuses({});
     try {
-      await onStart(currentWorkflowId);
+      await onStart(currentWorkflowId, inputs);
     } catch (err) {
       const msg = err.detail || err.message || 'Failed to start workflow.';
       setStatus(msg);
@@ -608,6 +609,31 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
           </div>
         </div>
       )}
+      {inputsModal && (
+        <div onClick={() => setInputsModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: '22px 22px 18px', width: 380, boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Run with inputs</div>
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 14 }}>Fill in the workflow inputs before starting.</div>
+            {inputsModal.fields.map(f => (
+              <div key={f.name} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#555', marginBottom: 3 }}>
+                  {f.name}{f.description ? <span style={{ fontWeight: 400, color: '#aaa', marginLeft: 6 }}>{f.description}</span> : null}
+                </div>
+                <input
+                  style={{ width: '100%', fontSize: 12, padding: '5px 8px', border: '1px solid #ddd', borderRadius: 5, boxSizing: 'border-box', fontFamily: 'Consolas, monospace' }}
+                  placeholder={f.type || 'string'}
+                  value={inputsModal.values[f.name] || ''}
+                  onChange={e => setInputsModal(prev => ({ ...prev, values: { ...prev.values, [f.name]: e.target.value } }))}
+                />
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+              <button onClick={() => setInputsModal(null)} style={{ flex: 1, padding: '7px', borderRadius: 6, border: '1px solid #e5e4e0', background: '#fff', fontSize: 12, color: '#555', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => { const v = inputsModal.values; setInputsModal(null); handleRun(v); }} style={{ flex: 2, padding: '7px', borderRadius: 6, border: 'none', background: '#1a1a1a', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>▶ Run</button>
+            </div>
+          </div>
+        </div>
+      )}
       <WorkflowSelector
         workflows={workflows}
         currentId={currentWorkflowId}
@@ -616,13 +642,21 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
         onDelete={handleWorkflowDelete}
         onRename={handleWorkflowRename}
       />
-      <GlobalConfigBar globalConfig={graph.global} onChange={handleGlobalChange} backendAvailable={backendAvailable} />
+      <GlobalConfigBar globalConfig={graph.global} onChange={handleGlobalChange} backendAvailable={backendAvailable} workflowId={currentWorkflowId} />
       <WorkspaceToolbar
         onAddNode={handleAddNode}
         onSave={saveCurrentGraph}
         onGenerate={generateCurrentWorkflow}
         onPreview={fetchPreview}
-        onStart={handleRun}
+        onStart={() => {
+          const declaredInputs = graph.global?.inputs || [];
+          if (declaredInputs.length > 0) {
+            const defaults = Object.fromEntries(declaredInputs.map(f => [f.name, '']));
+            setInputsModal({ fields: declaredInputs, values: defaults });
+          } else {
+            handleRun({});
+          }
+        }}
         status={status}
         disabled={!backendAvailable}
       />
