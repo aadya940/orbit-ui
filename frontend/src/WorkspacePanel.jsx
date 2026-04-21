@@ -305,10 +305,16 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       edgeType = 'conditional_false';
     }
 
-    // Reject sequential edges that would create a cycle — catch it at draw time, not generate time.
+    // If the edge would create a cycle, offer to turn it into a loop_back instead.
     if (edgeType !== 'loop_back' && edgeType !== 'foreach_done' && _wouldCycle(graph.edges, params.source, params.target)) {
-      setStatus('❌ This connection would create a cycle. Draw the edge upward to create a retry loop instead.');
-      return;
+      const raw = window.prompt('This connection loops back. Enter max iterations for the retry loop:', '3');
+      const iterations = parseInt(raw, 10);
+      if (!raw || Number.isNaN(iterations) || iterations < 1) {
+        setStatus('Loop creation canceled. Provide a positive integer.');
+        return;
+      }
+      edgeType = 'loop_back';
+      maxIterations = iterations;
     }
 
     const newEdge = {

@@ -83,6 +83,8 @@ const s = {
   },
 };
 
+import imageDoc from './assets/image-doc.png';
+
 const C = ({ children }) => <code style={s.code}>{children}</code>;
 
 const NodeCard = ({ icon, name, color, children }) => (
@@ -116,6 +118,12 @@ export default function DocsPanel() {
 
         <h1 style={s.h1}>Orbit Studio</h1>
         <p style={s.lead}>Build desktop automation workflows visually. Connect nodes, run the agent, watch it work.</p>
+
+        <img
+          src={imageDoc}
+          alt="Example workflow"
+          style={{ width: '100%', borderRadius: 10, border: '1px solid #e5e4e0', marginBottom: 48, display: 'block' }}
+        />
 
         {/* ── QUICK START ─────────────────────────────────── */}
         <h2 style={s.h2}>Quick start</h2>
