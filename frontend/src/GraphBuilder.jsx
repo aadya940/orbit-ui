@@ -67,6 +67,7 @@ const EDGE_STROKE = {
   conditional_true:  '#4ade80',
   conditional_false: '#f87171',
   loop_back:         '#f59e0b',
+  foreach_done:      '#94a3b8',
 };
 
 export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onConnect, onSelectNode, onEdgeDelete, selectedNodeId, nodeStatuses = {} }) {
@@ -101,6 +102,7 @@ export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onCo
           edge.type === 'loop_back' ? `loop ×${edge.max_iterations || 3}`
           : edge.type === 'conditional_true' ? 'true'
           : edge.type === 'conditional_false' ? 'false'
+          : edge.type === 'foreach_done' ? 'done'
           : '';
         return {
           id: edge.id,

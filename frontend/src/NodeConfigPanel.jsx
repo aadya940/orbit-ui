@@ -192,6 +192,68 @@ function KeyValueEditor({ data, onChange }) {
   );
 }
 
+function McpServersEditor({ servers, onChange }) {
+  function addServer() {
+    onChange([...servers, { transport: 'stdio', command: '', args: [], url: '' }]);
+  }
+  function removeServer(i) {
+    onChange(servers.filter((_, idx) => idx !== i));
+  }
+  function updateServer(i, patch) {
+    onChange(servers.map((s, idx) => idx === i ? { ...s, ...patch } : s));
+  }
+  function updateArgs(i, rawText) {
+    // Split comma-separated args
+    const args = rawText.split(',').map(a => a.trim()).filter(Boolean);
+    updateServer(i, { args });
+  }
+
+  return (
+    <>
+      <hr style={divider} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <div style={sectionLabel}>MCP SERVERS</div>
+        <button style={styles.kvAddBtn} onClick={addServer}>+ Add</button>
+      </div>
+      {servers.length === 0 && (
+        <div style={{ fontSize: 10, color: '#bbb', marginBottom: 6 }}>No MCP servers. Click + Add to connect one.</div>
+      )}
+      {servers.map((srv, i) => (
+        <div key={i} style={{ border: '1px solid #f0f0f0', borderRadius: 5, padding: '7px 8px', marginBottom: 7, background: '#fafafa' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+            <select
+              style={{ ...styles.select, width: 90, padding: '3px 5px', fontSize: 11 }}
+              value={srv.transport}
+              onChange={e => updateServer(i, { transport: e.target.value })}
+            >
+              <option value="stdio">stdio</option>
+              <option value="sse">SSE</option>
+            </select>
+            <button style={{ ...styles.kvRemoveBtn, fontSize: 12 }} onClick={() => removeServer(i)}>×</button>
+          </div>
+          {srv.transport === 'stdio' ? (
+            <>
+              <div style={styles.fieldGroup}>
+                <label style={styles.label}>Command</label>
+                <input style={styles.input} value={srv.command || ''} placeholder="e.g. npx" onChange={e => updateServer(i, { command: e.target.value })} />
+              </div>
+              <div style={styles.fieldGroup}>
+                <label style={styles.label}>Args (comma-separated)</label>
+                <input style={styles.input} value={(srv.args || []).join(', ')} placeholder="-y, @modelcontextprotocol/server-filesystem, /workspace" onChange={e => updateArgs(i, e.target.value)} />
+              </div>
+            </>
+          ) : (
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>URL</label>
+              <input style={styles.input} value={srv.url || ''} placeholder="http://localhost:8000/sse" onChange={e => updateServer(i, { url: e.target.value })} />
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
   if (!node) return null;
 
@@ -348,12 +410,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
               <textarea style={styles.textarea} value={config.extra_info || ""} onChange={(e) => updateConfig("extra_info", e.target.value)} placeholder="Advisory context for the agent..." />
             </div>
           )}
-          {showExtraInfo && (
-            <div style={{ ...styles.fieldGroup, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" id="planner-toggle" checked={!!config.planner} onChange={(e) => updateConfig("planner", e.target.checked)} />
-              <label htmlFor="planner-toggle" style={{ ...styles.label, marginBottom: 0, cursor: 'pointer' }}>Use planner (multi-step tasks)</label>
-            </div>
-          )}
+
           {nodeType !== "Code" && nodeType !== "ForEach" && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>LLM override</label>
@@ -392,6 +449,14 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
           <div style={sectionLabel}>OUTPUT SCHEMA</div>
           <SchemaEditor fields={schemaFields} onChange={updateSchema} />
         </>
+      )}
+
+      {/* MCP Servers — available for agent-like nodes */}
+      {(nodeType === "Do" || nodeType === "Navigate" || nodeType === "Fill" || nodeType === "Read" || nodeType === "Check" || nodeType === "Agent") && (
+        <McpServersEditor
+          servers={config.mcp_servers || []}
+          onChange={(servers) => updateConfig("mcp_servers", servers.length > 0 ? servers : undefined)}
+        />
       )}
 
       {/* Delete — full-width at bottom */}

@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import VMViewer from './VMViewer';
 import WorkspacePanel from './WorkspacePanel';
+import DocsPanel from './DocsPanel';
 
 const NAV_TABS = ['Home', 'Tasks', 'Desktop', 'Docs'];
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -283,10 +284,17 @@ const handleWorkflowEnd = useCallback((status) => {
         </nav>
 
         {/* Content */}
-        <div className="content">
+        <div className="content" style={activeTab === 'Docs' ? { overflow: 'hidden' } : {}}>
+
+          {/* Docs tab — full-width overlay */}
+          {activeTab === 'Docs' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <DocsPanel />
+            </div>
+          )}
 
           {/* Left — VM feed */}
-          <div className="left-panel">
+          <div className="left-panel" style={activeTab === 'Docs' ? { display: 'none' } : {}}>
             <div className="panel-header">
               <div className="task-meta">
                 <div className="status-row">
@@ -345,6 +353,7 @@ const handleWorkflowEnd = useCallback((status) => {
           {/* Resize divider */}
           <div
             onMouseDown={onDividerMouseDown}
+            style={activeTab === 'Docs' ? { display: 'none' } : undefined}
             style={{
               width: 4,
               flexShrink: 0,
@@ -366,7 +375,7 @@ const handleWorkflowEnd = useCallback((status) => {
           </div>
 
           {/* Right — workspace */}
-          <div className="right-panel" style={{ width: rightWidth }}>
+          <div className="right-panel" style={{ width: rightWidth, display: activeTab === 'Docs' ? 'none' : undefined }}>
             <WorkspacePanel onStart={handleStart} onWorkflowEnd={handleWorkflowEnd} />
           </div>
 

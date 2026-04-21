@@ -138,6 +138,22 @@ export default function OrbitNode({ data, selected }) {
       )}
 
       <Handle type="source" position={Position.Bottom} id="handle-out" style={handle} />
+
+      {data.nodeType === 'ForEach' && (
+        <>
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            id="handle-foreach-done"
+            style={{ ...handle, left: '75%', background: '#94a3b8', width: 10, height: 10 }}
+            title="After loop (done)"
+          />
+          <div style={{
+            position: 'absolute', bottom: -18, left: '75%', transform: 'translateX(-50%)',
+            fontSize: 9, color: '#94a3b8', whiteSpace: 'nowrap', pointerEvents: 'none',
+          }}>done</div>
+        </>
+      )}
     </div>
   );
 }

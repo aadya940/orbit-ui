@@ -64,7 +64,7 @@ class Edge:
     type: str  # sequential | conditional_true | conditional_false | loop_back
     max_iterations: int = 3
 
-    VALID_TYPES = {"sequential", "conditional_true", "conditional_false", "loop_back"}
+    VALID_TYPES = {"sequential", "conditional_true", "conditional_false", "loop_back", "foreach_done"}
 
 
 @dataclass
@@ -161,16 +161,82 @@ def _detect_loops(edges: list[Edge]) -> list[LoopGroup]:
     return loops
 
 
+def _reachable_from(
+    start: str,
+    out_edges: dict[str, list[Edge]],
+    skip_types: frozenset = frozenset({"loop_back"}),
+) -> set[str]:
+    """DFS from start following edges whose type is not in skip_types."""
+    visited: set[str] = set()
+    stack = [start]
+    while stack:
+        nid = stack.pop()
+        if nid in visited:
+            continue
+        visited.add(nid)
+        for e in out_edges.get(nid, []):
+            if e.type not in skip_types:
+                stack.append(e.target)
+    return visited
+
+
+def _reachable_between(
+    header: str,
+    tail: str,
+    out_edges: dict[str, list[Edge]],
+    topo_order: list[str],
+) -> list[str]:
+    """Nodes reachable from header (not via loop_back) before reaching tail.
+
+    Returns the nodes in topo order, excluding header and tail themselves.
+    """
+    visited: set[str] = set()
+    stack = [header]
+    while stack:
+        nid = stack.pop()
+        if nid in visited:
+            continue
+        visited.add(nid)
+        for e in out_edges.get(nid, []):
+            if e.type == "loop_back":
+                continue
+            if e.target == tail:
+                continue
+            if e.target not in visited:
+                stack.append(e.target)
+    visited.discard(header)
+    return [n for n in topo_order if n in visited]
+
+
+def _find_merge_point(
+    true_target: str | None,
+    false_target: str | None,
+    out_edges: dict[str, list[Edge]],
+    topo_order: list[str],
+) -> str | None:
+    """Return the first node in topo order reachable from both conditional branches."""
+    if not true_target or not false_target:
+        return None
+    true_reachable = _reachable_from(true_target, out_edges)
+    false_reachable = _reachable_from(false_target, out_edges)
+    common = (true_reachable & false_reachable) - {true_target, false_target}
+    for nid in topo_order:
+        if nid in common:
+            return nid
+    return None
+
+
 def _topo_sort(
     nodes: list[Node], edges: list[Edge], loops: list[LoopGroup]
 ) -> list[str]:
-    """Kahn's algorithm, excluding loop_back edges."""
+    """Kahn's algorithm, excluding loop_back edges (foreach_done edges are included)."""
     node_ids = {n.id for n in nodes}
-    non_loop_edges = [e for e in edges if e.type != "loop_back"]
+    # Exclude loop_back for cycle detection; foreach_done is a real DAG edge
+    dag_edges = [e for e in edges if e.type != "loop_back"]
 
     in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
     adj: dict[str, list[str]] = defaultdict(list)
-    for e in non_loop_edges:
+    for e in dag_edges:
         adj[e.source].append(e.target)
         in_degree[e.target] = in_degree.get(e.target, 0) + 1
 
@@ -192,10 +258,9 @@ def _topo_sort(
     if len(order) != len(node_ids):
         missing = node_ids - set(order)
         node_labels = {n.id: (n.label or n.type or n.id) for n in nodes}
-        # Find the specific edges that form the cycle (edges between stuck nodes)
         cycle_edges = [
             f"{node_labels.get(e.source, e.source)!r} ({e.source}) → {node_labels.get(e.target, e.target)!r} ({e.target})"
-            for e in non_loop_edges
+            for e in dag_edges
             if e.source in missing and e.target in missing
         ]
         detail = (
@@ -207,19 +272,25 @@ def _topo_sort(
             f"as a loop_back edge by drawing it from a lower node to a higher one.{detail}"
         )
 
-    # Fill loop body lists
+    # Build out_edges map for reachability (excluding loop_back)
+    out_edges_dag: dict[str, list[Edge]] = defaultdict(list)
+    for e in dag_edges:
+        out_edges_dag[e.source].append(e)
+
+    # Fill loop body lists using DFS reachability instead of index slicing
     for lg in loops:
-        try:
-            h_idx = order.index(lg.header)
-            t_idx = order.index(lg.tail)
-        except ValueError as exc:
-            raise CodegenError(f"Loop references unknown node: {exc}") from exc
+        if lg.header not in {n.id for n in nodes} or lg.tail not in {n.id for n in nodes}:
+            raise CodegenError(f"Loop references unknown node (header={lg.header!r}, tail={lg.tail!r})")
+        h_idx = order.index(lg.header) if lg.header in order else -1
+        t_idx = order.index(lg.tail) if lg.tail in order else -1
+        if h_idx == -1 or t_idx == -1:
+            raise CodegenError(f"Loop header/tail not in topo order: {lg.header!r}, {lg.tail!r}")
         if h_idx > t_idx:
             raise CodegenError(
                 f"loop_back edge target {lg.header!r} must come before source "
                 f"{lg.tail!r} in topological order."
             )
-        lg.body = order[h_idx + 1: t_idx]
+        lg.body = _reachable_between(lg.header, lg.tail, out_edges_dag, order)
 
     return order
 
@@ -322,6 +393,38 @@ def _node_llm_expr(node: Node, global_cfg: GlobalConfig) -> str:
     return "model"
 
 
+def _mcp_open_lines(node: Node, indent: int) -> tuple[list[str], list[str], int]:
+    """Return (open_lines, close_lines, inner_indent) for MCP context managers on a node.
+
+    Each MCP server wraps the verb call in an ``async with MCPToolset...`` block.
+    Returns the opening lines, closing lines (empty — context managers auto-close),
+    and the new indent level inside the innermost context.
+    """
+    servers = node.config.get("mcp_servers") or []
+    open_lines: list[str] = []
+    for idx, srv in enumerate(servers):
+        pad = "    " * (indent + idx)
+        transport = srv.get("transport", "stdio")
+        if transport == "sse":
+            url = srv.get("url", "")
+            open_lines.append(f"{pad}async with _MCPToolset.from_server(_SseServerParams(url={url!r})) as _mcp_{node.id}_{idx}:")
+        else:
+            cmd = srv.get("command", "")
+            args = srv.get("args") or []
+            open_lines.append(f"{pad}async with _MCPToolset.from_server(_StdioParams(command={cmd!r}, args={args!r})) as _mcp_{node.id}_{idx}:")
+    inner_indent = indent + len(servers)
+    return open_lines, inner_indent
+
+
+def _mcp_extra_tools_expr(node: Node, indent: int) -> str | None:
+    """Return the extra_tools=[...] expression for MCP servers, or None."""
+    servers = node.config.get("mcp_servers") or []
+    if not servers:
+        return None
+    parts = [f"*_mcp_{node.id}_{idx}.tools" for idx in range(len(servers))]
+    return f"[{', '.join(parts)}]"
+
+
 def _emit_node(
     node: Node,
     global_cfg: GlobalConfig,
@@ -354,6 +457,11 @@ def _emit_node(
         lines.append(f'{pad}report_node("{node.id}", "running")')
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
 
+    # Open MCP context managers (if any), adjusting effective indent for the verb call
+    mcp_open, verb_indent = _mcp_open_lines(node, indent)
+    lines.extend(mcp_open)
+    vpad = "    " * verb_indent  # effective padding inside context managers
+
     # Common kwargs
     steps_arg = f", max_steps={max_steps}" if max_steps is not None else ""
     timeout_val = node.config.get("timeout") or None
@@ -376,22 +484,27 @@ def _emit_node(
         else:
             common += f", extra_info={extra_info!r}"
 
+    # Append extra_tools for MCP servers
+    mcp_tools = _mcp_extra_tools_expr(node, indent)
+    if mcp_tools:
+        common += f", extra_tools={mcp_tools}"
+
     if node.type == "Navigate":
         target = node.config.get("target", "").strip()
         target, is_fstr = _resolve_all(target, nodes_by_id)
         target = _esc(target)
         q = "f" if is_fstr else ""
         if node.output_schema:
-            lines.append(f"{pad}_{node.id}_result = await Navigate(")
-            lines.append(f"{pad}    {q}\"{target}\", {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
-            lines.append(f"{pad}{node.id}_out = _{node.id}_result.output")
+            lines.append(f"{vpad}_{node.id}_result = await Navigate(")
+            lines.append(f"{vpad}    {q}\"{target}\", {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
-            lines.append(f"{pad}_{node.id}_result = await Navigate(")
-            lines.append(f"{pad}    {q}\"{target}\", {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}_{node.id}_result = await Navigate(")
+            lines.append(f"{vpad}    {q}\"{target}\", {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
 
     elif node.type == "Do":
         task = node.config.get("task", "").strip()
@@ -400,17 +513,17 @@ def _emit_node(
         q = "f" if is_fstr else ""
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
-            lines.append(f"{pad}_{node.id}_result = await Do(")
-            lines.append(f"{pad}    {q}\"{task}\", {common},")
-            lines.append(f"{pad}    output_schema={cls_name},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
-            lines.append(f"{pad}{node.id}_out = _{node.id}_result.output")
+            lines.append(f"{vpad}_{node.id}_result = await Do(")
+            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f"{vpad}    output_schema={cls_name},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
-            lines.append(f"{pad}_{node.id}_result = await Do(")
-            lines.append(f"{pad}    {q}\"{task}\", {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}_{node.id}_result = await Do(")
+            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
 
     elif node.type == "Read":
         task = node.config.get("task", "").strip()
@@ -419,16 +532,16 @@ def _emit_node(
         q = "f" if is_fstr else ""
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
-            lines.append(f"{pad}_{node.id}_result = await Read(")
-            lines.append(f"{pad}    {q}\"{task}\", schema={cls_name}, {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
-            lines.append(f"{pad}{node.id}_out = _{node.id}_result.output")
+            lines.append(f"{vpad}_{node.id}_result = await Read(")
+            lines.append(f"{vpad}    {q}\"{task}\", schema={cls_name}, {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
-            lines.append(f"{pad}_{node.id}_result = await Read(")
-            lines.append(f"{pad}    {q}\"{task}\", {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}_{node.id}_result = await Read(")
+            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
 
     elif node.type == "Fill":
         target = node.config.get("target", "").strip()
@@ -447,12 +560,12 @@ def _emit_node(
         q = "f" if is_fstr else ""
         # Build data dict literal — use f-string for values that contain {…}
         data_items = ", ".join(f"{k!r}: {q}\"{_esc(v)}\"" for k, v in resolved_data.items())
-        lines.append(f"{pad}_{node.id}_result = await Fill(")
-        lines.append(f"{pad}    {q}\"{target}\",")
-        lines.append(f"{pad}    data={{{data_items}}},")
-        lines.append(f"{pad}    {common},")
-        lines.append(f"{pad}).run()")
-        lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+        lines.append(f"{vpad}_{node.id}_result = await Fill(")
+        lines.append(f"{vpad}    {q}\"{target}\",")
+        lines.append(f"{vpad}    data={{{data_items}}},")
+        lines.append(f"{vpad}    {common},")
+        lines.append(f"{vpad}).run()")
+        lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
 
     elif node.type == "Agent":
         class_name = node.config.get("class_name", "CustomVerb").strip()
@@ -461,23 +574,23 @@ def _emit_node(
         task = _esc(task)
         q = "f" if is_fstr else ""
         if node.output_schema:
-            lines.append(f"{pad}_{node.id}_result = await {class_name}(")
-            lines.append(f"{pad}    {q}\"{task}\", {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
-            lines.append(f"{pad}{node.id}_out = _{node.id}_result.output")
+            lines.append(f"{vpad}_{node.id}_result = await {class_name}(")
+            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
-            lines.append(f"{pad}_{node.id}_result = await {class_name}(")
-            lines.append(f"{pad}    {q}\"{task}\", {common},")
-            lines.append(f"{pad}).run()")
-            lines.append(f"{pad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(f"{vpad}_{node.id}_result = await {class_name}(")
+            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f"{vpad}).run()")
+            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
 
     elif node.type == "Check":
         # Check is handled at the control-flow level, not here
         pass
 
     if node.type not in ("Check", "Code"):
-        lines.append(f'{pad}report_node("{node.id}", "success")')
+        lines.append(f'{vpad}report_node("{node.id}", "success")')
 
     return lines
 
@@ -499,6 +612,194 @@ def _emit_check_expr(
     return f'await Check({q}"{condition}", {common}).check()'
 
 
+# ── Recursive subgraph emission ──────────────────────────────────────────────
+
+def _emit_loop_group(
+    lg: LoopGroup,
+    indent: int,
+    emitted: set[str],
+    ctx: dict,
+) -> tuple[list[str], str | None]:
+    """Emit a retry loop group. Returns (lines, nid_to_continue_after_loop)."""
+    lines: list[str] = []
+    nodes_by_id = ctx["nodes_by_id"]
+    global_cfg = ctx["global_cfg"]
+    log_file_path = ctx["log_file_path"]
+    loop_pad = "    " * indent
+    inner_indent = indent + 1
+    inner_pad = "    " * inner_indent
+    break_pad = "    " * (inner_indent + 1)
+
+    header_node = nodes_by_id[lg.header]
+    tail_node = nodes_by_id[lg.tail]
+
+    lines.append(f"{loop_pad}for _attempt_{lg.header} in range({lg.max_iterations}):")
+
+    if header_node.type == "Check":
+        # Pattern A: Check is the loop header (check-first retry)
+        for body_nid in lg.body:
+            body_node = nodes_by_id[body_nid]
+            lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+            if body_node.output_schema:
+                ctx["prev_output_var"][0] = f"{body_nid}_out"
+            emitted.add(body_nid)
+
+        if tail_node.type != "Check":
+            lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+            if tail_node.output_schema:
+                ctx["prev_output_var"][0] = f"{lg.tail}_out"
+        emitted.add(lg.tail)
+        check_node, check_nid = header_node, lg.header
+    else:
+        # Pattern B: non-Check header (e.g. Navigate → Check)
+        lines.extend(_emit_node(header_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+        if header_node.output_schema:
+            ctx["prev_output_var"][0] = f"{lg.header}_out"
+
+        for body_nid in lg.body:
+            body_node = nodes_by_id[body_nid]
+            lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+            if body_node.output_schema:
+                ctx["prev_output_var"][0] = f"{body_nid}_out"
+            emitted.add(body_nid)
+
+        if tail_node.type != "Check":
+            raise CodegenError(
+                f"Loop from non-Check header {lg.header!r}: tail node {lg.tail!r} "
+                f"must be a Check node, got {tail_node.type!r}"
+            )
+        emitted.add(lg.tail)
+        check_node, check_nid = tail_node, lg.tail
+
+    check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
+    lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
+    lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
+    lines.append(f"{inner_pad}if {check_expr}:")
+
+    # Determine what follows the loop (conditional_true target outside loop)
+    cond = ctx["conditionals"].get(check_nid, {})
+    true_target = cond.get("true")
+    loop_inner = ctx["loop_inner_members"]
+    if true_target and true_target not in loop_inner:
+        lines.append(f"{break_pad}break")
+        after_loop_nid: str | None = true_target
+    else:
+        lines.append(f"{break_pad}pass")
+        # Fall through to sequential successors of tail outside the loop
+        seq_after = [
+            e.target for e in ctx["out_edges"].get(check_nid, [])
+            if e.type == "sequential" and e.target not in loop_inner
+        ]
+        after_loop_nid = seq_after[0] if seq_after else None
+
+    lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
+    lines.append(f"{break_pad}await asyncio.sleep(3)")
+    lines.append(f"{loop_pad}else:")
+    lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+    lines.append(f"{loop_pad}    return")
+
+    return lines, after_loop_nid
+
+
+def _emit_subgraph(
+    start_nid: str,
+    indent: int,
+    emitted: set[str],
+    stop_set: set[str],
+    ctx: dict,
+) -> list[str]:
+    """Walk the graph from start_nid emitting code, stopping at stop_set or dead ends."""
+    lines: list[str] = []
+    nid: str | None = start_nid
+
+    while nid and nid not in emitted and nid not in stop_set:
+        node = ctx["nodes_by_id"].get(nid)
+        if not node:
+            break
+
+        pad = "    " * indent
+        out = ctx["out_edges"].get(nid, [])
+
+        # ── ForEach ───────────────────────────────────────────────────────────
+        if node.type == "ForEach":
+            emitted.add(nid)
+            loop_var = (node.config.get("loop_var") or "item").strip()
+            items_expr = (node.config.get("items_expr") or "[]").strip()
+            lines.append(f"{pad}report_node({nid!r}, 'running')")
+            lines.append(f"{pad}for {loop_var} in ({items_expr}):")
+
+            # Body: all non-foreach_done, non-loop_back outgoing edges
+            body_targets = [e.target for e in out if e.type not in ("foreach_done", "loop_back")]
+            for body_start in body_targets:
+                lines.extend(_emit_subgraph(body_start, indent + 1, emitted, stop_set, ctx))
+
+            lines.append(f"{pad}    report_node({nid!r}, 'success')")
+
+            # After loop: foreach_done edge
+            done = [e.target for e in out if e.type == "foreach_done"]
+            nid = done[0] if done else None
+            continue
+
+        # ── Loop header ───────────────────────────────────────────────────────
+        if nid in ctx["loop_headers"]:
+            lg = ctx["loop_headers"][nid]
+            emitted.add(nid)
+            loop_lines, after_nid = _emit_loop_group(lg, indent, emitted, ctx)
+            lines.extend(loop_lines)
+            nid = after_nid
+            continue
+
+        # ── Conditional Check (standalone, not a loop inner member) ───────────
+        if nid in ctx["conditionals"] and nid not in ctx["loop_inner_members"]:
+            emitted.add(nid)
+            cond = ctx["conditionals"][nid]
+            check_expr = _emit_check_expr(node, ctx["global_cfg"], ctx["nodes_by_id"])
+
+            lines.append(f'{pad}report_node("{nid}", "running")')
+            lines.append(f'{pad}print("--- {nid}: {node.label} ---")')
+            lines.append(f"{pad}if {check_expr}:")
+
+            true_target = cond.get("true")
+            false_target = cond.get("false")
+            merge = _find_merge_point(true_target, false_target, ctx["out_edges"], ctx["topo_order"])
+            branch_stop = stop_set | ({merge} if merge else set())
+
+            true_lines = _emit_subgraph(true_target, indent + 1, emitted, branch_stop, ctx) if true_target else []
+            if true_lines:
+                lines.extend(true_lines)
+            else:
+                lines.append(f"{'    ' * (indent + 1)}pass")
+
+            if false_target:
+                false_lines = _emit_subgraph(false_target, indent + 1, emitted, branch_stop, ctx)
+                if false_lines:
+                    lines.append(f"{pad}else:")
+                    lines.extend(false_lines)
+
+            nid = merge
+            continue
+
+        # ── Skip loop inner members (body/tail handled by _emit_loop_group) ───
+        if nid in ctx["loop_inner_members"]:
+            break
+
+        # ── Regular node ──────────────────────────────────────────────────────
+        emitted.add(nid)
+        node_lines = _emit_node(
+            node, ctx["global_cfg"], ctx["nodes_by_id"],
+            indent, ctx["log_file_path"], ctx["prev_output_var"][0],
+        )
+        lines.extend(node_lines)
+        if node.output_schema:
+            ctx["prev_output_var"][0] = f"{nid}_out"
+
+        # Follow first sequential edge
+        seq = [e.target for e in out if e.type == "sequential"]
+        nid = seq[0] if seq else None
+
+    return lines
+
+
 # ── Main generation ──────────────────────────────────────────────────────────
 
 def generate(graph_data: dict, log_file_path: str | None = None) -> str:
@@ -511,11 +812,11 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
 
     # Build lookup structures
     loop_headers = {lg.header: lg for lg in loops}
-    loop_members = set()
+    # loop_inner_members: body + tail (NOT headers — headers trigger loop emission)
+    loop_inner_members: set[str] = set()
     for lg in loops:
-        loop_members.add(lg.header)
-        loop_members.update(lg.body)
-        loop_members.add(lg.tail)
+        loop_inner_members.update(lg.body)
+        loop_inner_members.add(lg.tail)
 
     # Detect conditional branches: Check nodes with true/false edges
     conditionals: dict[str, dict] = {}
@@ -530,6 +831,20 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
                 "true": true_targets[0] if true_targets else None,
                 "false": false_targets[0] if false_targets else None,
             }
+
+    # ── Build emission context ────────────────────────────────────────────
+    ctx = {
+        "nodes_by_id": nodes_by_id,
+        "out_edges": out_edges,
+        "in_edges": in_edges,
+        "loop_headers": loop_headers,
+        "loop_inner_members": loop_inner_members,
+        "conditionals": conditionals,
+        "global_cfg": global_cfg,
+        "log_file_path": log_file_path,
+        "topo_order": order,
+        "prev_output_var": [None],  # mutable single-element list so recursive calls share state
+    }
 
     # ── Emit file ─────────────────────────────────────────────────────────
     lines: list[str] = []
@@ -559,6 +874,13 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     has_schema = any(n.output_schema for n in nodes)
     if has_schema:
         lines.append("from pydantic import BaseModel")
+
+    # MCP toolset import (only if any node uses mcp_servers)
+    has_mcp = any(n.config.get("mcp_servers") for n in nodes)
+    if has_mcp:
+        lines.append("from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset as _MCPToolset")
+        lines.append("from google.adk.tools.mcp_tool.mcp_toolset import StdioServerParameters as _StdioParams")
+        lines.append("from google.adk.tools.mcp_tool.mcp_toolset import SseServerParams as _SseServerParams")
 
     # ForEach generates a plain Python for-loop — no orbit class to import
     verb_types = {n.type for n in nodes if n.type not in ("Code", "Agent", "ForEach")}
@@ -638,150 +960,22 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         lines.append('')
     lines.append("    async with session() as s:")
 
-    # Walk nodes in topo order, emit code
+    # Find root nodes: no incoming DAG edges (excluding loop_back) and not loop inner members
+    dag_in_degree: dict[str, int] = {n.id: 0 for n in nodes}
+    for e in edges:
+        if e.type != "loop_back":
+            dag_in_degree[e.target] = dag_in_degree.get(e.target, 0) + 1
+
+    roots = [
+        nid for nid in order
+        if dag_in_degree.get(nid, 0) == 0 and nid not in loop_inner_members
+    ]
+
+    # Emit all subgraphs from roots using recursive emission
     emitted: set[str] = set()
-    foreach_indent = 2   # bumped to 3 once a ForEach node is emitted
-    foreach_node_id: str | None = None
-    prev_output_var: str | None = None  # last node output var to auto-pipe via extra_info
-    i = 0
-    while i < len(order):
-        nid = order[i]
-        if nid in emitted:
-            i += 1
-            continue
-
-        node = nodes_by_id[nid]
-
-        # Case 0: ForEach node — open a for-loop over the items expression
-        if node.type == "ForEach":
-            loop_var = (node.config.get("loop_var") or "item").strip()
-            items_expr = (node.config.get("items_expr") or "[]").strip()
-            pad = "    " * foreach_indent
-            lines.append(f"{pad}report_node({nid!r}, 'running')")
-            lines.append(f"{pad}for {loop_var} in ({items_expr}):")
-            foreach_indent = 3
-            foreach_node_id = nid
-            emitted.add(nid)
-            i += 1
-            continue
-
-        # Case 1: Loop header
-        if nid in loop_headers:
-            lg = loop_headers[nid]
-            tail_node = nodes_by_id[lg.tail]
-            loop_pad = "    " * foreach_indent
-            inner_pad_n = foreach_indent + 1
-            lines.append(f"{loop_pad}for _attempt_{nid} in range({lg.max_iterations}):")
-
-            if node.type == "Check":
-                # Pattern A: Check is the loop header (check-first retry)
-                for body_nid in lg.body:
-                    body_node = nodes_by_id[body_nid]
-                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
-                    if body_node.output_schema:
-                        prev_output_var = f"{body_nid}_out"
-                    emitted.add(body_nid)
-
-                if tail_node.type != "Check":
-                    lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
-                    if tail_node.output_schema:
-                        prev_output_var = f"{lg.tail}_out"
-                emitted.add(lg.tail)
-
-                check_node, check_nid = node, nid
-            else:
-                # Pattern B: Non-Check header (e.g. Navigate → Check).
-                lines.extend(_emit_node(node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
-                if node.output_schema:
-                    prev_output_var = f"{nid}_out"
-
-                for body_nid in lg.body:
-                    body_node = nodes_by_id[body_nid]
-                    lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var))
-                    if body_node.output_schema:
-                        prev_output_var = f"{body_nid}_out"
-                    emitted.add(body_nid)
-
-                if tail_node.type != "Check":
-                    raise CodegenError(
-                        f"Loop from non-Check header {nid!r}: tail node {lg.tail!r} "
-                        f"must be a Check node, got {tail_node.type!r}"
-                    )
-                emitted.add(lg.tail)
-                check_node, check_nid = tail_node, lg.tail
-
-            # Emit the Check condition
-            check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
-            inner_spaces = "    " * inner_pad_n
-            lines.append(f'{inner_spaces}report_node("{check_nid}", "running")')
-            lines.append(f'{inner_spaces}print("--- {check_nid}: {check_node.label} ---")')
-            lines.append(f"{inner_spaces}if {check_expr}:")
-
-            cond = conditionals.get(check_nid, {})
-            true_target = cond.get("true")
-            break_spaces = "    " * (inner_pad_n + 1)
-            if true_target and true_target not in loop_members:
-                lines.append(f"{break_spaces}break")
-            else:
-                lines.append(f"{break_spaces}pass")
-
-            lines.append(f"{inner_spaces}if _attempt_{nid} < {lg.max_iterations - 1}:")
-            lines.append(f"{break_spaces}await asyncio.sleep(3)")
-            lines.append(f"{loop_pad}else:")
-            lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
-            lines.append(f"{loop_pad}    return")
-
-            emitted.add(nid)
-            i += 1
-            continue
-
-        # Case 2: Conditional Check (not in a loop)
-        if nid in conditionals and nid not in loop_members:
-            cond = conditionals[nid]
-            check_expr = _emit_check_expr(node, global_cfg, nodes_by_id)
-            pad = "    " * foreach_indent
-            inner_pad_n = foreach_indent + 1
-            lines.append(f'{pad}report_node("{nid}", "running")')
-            lines.append(f'{pad}print("--- {nid}: {node.label} ---")')
-            lines.append(f"{pad}if {check_expr}:")
-
-            if cond["true"]:
-                true_node = nodes_by_id[cond["true"]]
-                true_lines = _emit_node(true_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var)
-                lines.extend(true_lines)
-                if true_node.output_schema:
-                    prev_output_var = f"{cond['true']}_out"
-                emitted.add(cond["true"])
-            else:
-                lines.append(f"{'    ' * inner_pad_n}pass")
-
-            if cond["false"]:
-                lines.append(f"{pad}else:")
-                false_node = nodes_by_id[cond["false"]]
-                false_lines = _emit_node(false_node, global_cfg, nodes_by_id, indent=inner_pad_n, log_file_path=log_file_path, prev_output_var=prev_output_var)
-                lines.extend(false_lines)
-                if false_node.output_schema:
-                    prev_output_var = f"{cond['false']}_out"
-                emitted.add(cond["false"])
-
-            emitted.add(nid)
-            i += 1
-            continue
-
-        # Case 3: Regular sequential node (skip standalone Check nodes that were
-        # already handled as conditionals or loop headers)
-        if nid not in loop_members:
-            node_lines = _emit_node(node, global_cfg, nodes_by_id, indent=foreach_indent, log_file_path=log_file_path, prev_output_var=prev_output_var)
-            lines.extend(node_lines)
-            if node.output_schema:
-                prev_output_var = f"{nid}_out"
-            emitted.add(nid)
-
-        i += 1
-
-    # Close ForEach loop with success report
-    if foreach_node_id:
-        lines.append(f"        report_node({foreach_node_id!r}, 'success')")
+    for root in roots:
+        if root not in emitted:
+            lines.extend(_emit_subgraph(root, 2, emitted, set(), ctx))
 
     lines.append("        report_node('__workflow__', 'success')")
     lines.append("        print('Workflow completed. Holding screen open... (Click Stop in UI to exit)')")

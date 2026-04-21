@@ -75,10 +75,18 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   const [logModal, setLogModal] = useState(null); // {runId, content}
   const [filePath, setFilePath] = useState('');
   const [fileEntries, setFileEntries] = useState([]);
+  const [errorToast, setErrorToast] = useState(null);
+  const errorToastTimer = useRef(null);
   const autosaveTimer = useRef(null);
   const esRef = useRef(null);
   const logScrollRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const showError = useCallback((msg) => {
+    clearTimeout(errorToastTimer.current);
+    setErrorToast(msg);
+    errorToastTimer.current = setTimeout(() => setErrorToast(null), 8000);
+  }, []);
 
   // ── Initialization ────────────────────────────────────────────────────────
 
@@ -289,6 +297,8 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       }
       edgeType = 'loop_back';
       maxIterations = iterations;
+    } else if (params.sourceHandle === 'handle-foreach-done') {
+      edgeType = 'foreach_done';
     } else if (params.sourceHandle === 'true') {
       edgeType = 'conditional_true';
     } else if (params.sourceHandle === 'false') {
@@ -296,7 +306,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
     }
 
     // Reject sequential edges that would create a cycle — catch it at draw time, not generate time.
-    if (edgeType !== 'loop_back' && _wouldCycle(graph.edges, params.source, params.target)) {
+    if (edgeType !== 'loop_back' && edgeType !== 'foreach_done' && _wouldCycle(graph.edges, params.source, params.target)) {
       setStatus('❌ This connection would create a cycle. Draw the edge upward to create a retry loop instead.');
       return;
     }
@@ -339,17 +349,28 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       if (result.status === 'generated') {
         setStatus('Workflow generated successfully.');
       } else {
-        setStatus(result.message || 'Generation failed.');
+        const msg = result.message || 'Generation failed.';
+        setStatus(msg);
+        showError(msg);
       }
       await fetchPreview();
     } catch (err) {
-      setStatus(err.message);
+      const msg = err.detail || err.message || 'Code generation failed.';
+      setStatus(msg);
+      showError(msg);
     }
   };
 
   const handleRun = useCallback(async () => {
     setNodeStatuses({});
-    await onStart(currentWorkflowId);
+    try {
+      await onStart(currentWorkflowId);
+    } catch (err) {
+      const msg = err.detail || err.message || 'Failed to start workflow.';
+      setStatus(msg);
+      showError(msg);
+      return;
+    }
     esRef.current?.close();
     const es = new EventSource('http://localhost:8000/events');
     es.onmessage = (e) => {
@@ -360,9 +381,15 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
         setNodeStatuses(data.statuses || {});
       } else if (data.node_id === '__workflow__') {
         const terminal = data.status === 'error' || data.status === 'stopped';
-        if (terminal) { es.close(); onWorkflowEnd?.(data.status); fetchRuns(currentWorkflowId); }
+        if (terminal) {
+          es.close();
+          onWorkflowEnd?.(data.status);
+          fetchRuns(currentWorkflowId);
+          if (data.status === 'error' && data.message) showError(data.message);
+        }
       } else if (data.node_id) {
         setNodeStatuses(prev => ({ ...prev, [data.node_id]: data.status }));
+        if (data.status === 'error' && data.message) showError(`Node error: ${data.message}`);
       }
     };
     es.onerror = () => { es.close(); };
@@ -433,6 +460,22 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
 
   return (
     <div className="workspace-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {errorToast && (
+        <div style={{
+          position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)',
+          background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626',
+          padding: '8px 14px 8px 12px', borderRadius: 7, fontSize: 12, zIndex: 9999,
+          maxWidth: 520, boxShadow: '0 2px 12px rgba(220,38,38,0.12)',
+          display: 'flex', alignItems: 'flex-start', gap: 8,
+        }}>
+          <span style={{ fontWeight: 700, flexShrink: 0 }}>⚠</span>
+          <span style={{ flex: 1, wordBreak: 'break-word' }}>{errorToast}</span>
+          <button
+            onClick={() => setErrorToast(null)}
+            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1, flexShrink: 0 }}
+          >×</button>
+        </div>
+      )}
       <WorkflowSelector
         workflows={workflows}
         currentId={currentWorkflowId}
