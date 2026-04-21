@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import asyncio
@@ -18,23 +19,25 @@ from fastapi.responses import StreamingResponse
 from contextlib import asynccontextmanager
 
 # Ensure DBUS_SESSION_BUS_ADDRESS is set so OculOS can connect to the session bus.
-if not os.environ.get('DBUS_SESSION_BUS_ADDRESS'):
-    _result = subprocess.run(['dbus-launch', '--sh-syntax'], capture_output=True, text=True)
+if not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
+    _result = subprocess.run(
+        ["dbus-launch", "--sh-syntax"], capture_output=True, text=True
+    )
     for _line in _result.stdout.splitlines():
-        if '=' in _line:
-            _key, _, _val = _line.partition('=')
-            os.environ[_key.strip()] = _val.strip().rstrip(';').strip("'")
+        if "=" in _line:
+            _key, _, _val = _line.partition("=")
+            os.environ[_key.strip()] = _val.strip().rstrip(";").strip("'")
 
 import state as _state
 from state import pause_event
 from codegen import generate, CodegenError
 
-FILES_ROOT    = Path("/workspace")
-WORKFLOW_JSON = Path("/workspace/workflow.json")   # legacy migration source
-WORKFLOW_PY   = Path("/workspace/workflow.py")     # always overwritten by current workflow
-SECRETS_FILE  = Path("/workspace/.secrets.env")    # legacy migration source
-ENV_FILE      = Path("/workspace/.env")            # legacy migration source
-DB_PATH       = Path("/workspace/orbit.db")
+FILES_ROOT = Path("/workspace")
+WORKFLOW_JSON = Path("/workspace/workflow.json")  # legacy migration source
+WORKFLOW_PY = Path("/workspace/workflow.py")  # always overwritten by current workflow
+SECRETS_FILE = Path("/workspace/.secrets.env")  # legacy migration source
+ENV_FILE = Path("/workspace/.env")  # legacy migration source
+DB_PATH = Path("/workspace/orbit.db")
 
 agent_task: asyncio.Task | None = None
 _current_run_id: str | None = None
@@ -42,6 +45,7 @@ _current_workflow_name: str = ""
 
 
 # ── SQLite helpers ────────────────────────────────────────────────────────────
+
 
 def _db() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH)
@@ -59,7 +63,8 @@ def _reload_secrets() -> None:
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _db() as con:
-        con.execute("""
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS workflows (
                 id      TEXT PRIMARY KEY,
                 name    TEXT NOT NULL DEFAULT 'Untitled',
@@ -67,14 +72,18 @@ def init_db() -> None:
                 created REAL NOT NULL,
                 updated REAL NOT NULL
             )
-        """)
-        con.execute("""
+        """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS secrets (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )
-        """)
-        con.execute("""
+        """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS runs (
                 id            TEXT PRIMARY KEY,
                 workflow_id   TEXT NOT NULL,
@@ -84,7 +93,8 @@ def init_db() -> None:
                 status        TEXT,
                 log_file      TEXT
             )
-        """)
+        """
+        )
 
     # Migrate legacy workflow.json → DB (only if DB is empty)
     with _db() as con:
@@ -93,7 +103,13 @@ def init_db() -> None:
                 now = time.time()
                 con.execute(
                     "INSERT INTO workflows VALUES (?,?,?,?,?)",
-                    (str(uuid.uuid4()), "Untitled", WORKFLOW_JSON.read_text(), now, now),
+                    (
+                        str(uuid.uuid4()),
+                        "Untitled",
+                        WORKFLOW_JSON.read_text(),
+                        now,
+                        now,
+                    ),
                 )
 
     # Migrate legacy .secrets.env and .env → DB (only if secrets table is empty)
@@ -115,6 +131,7 @@ def init_db() -> None:
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -135,11 +152,14 @@ app.add_middleware(
 
 # ── Secrets endpoints ─────────────────────────────────────────────────────────
 
+
 @app.get("/secrets")
 async def secrets_list():
     """Return secret keys only — values never leave the server."""
     with _db() as con:
-        keys = [row["key"] for row in con.execute("SELECT key FROM secrets ORDER BY key")]
+        keys = [
+            row["key"] for row in con.execute("SELECT key FROM secrets ORDER BY key")
+        ]
     return {"keys": keys}
 
 
@@ -160,6 +180,7 @@ async def secrets_save(payload: dict):
 
 # ── Workflow CRUD endpoints ───────────────────────────────────────────────────
 
+
 @app.get("/workflows")
 async def workflows_list():
     with _db() as con:
@@ -174,9 +195,18 @@ async def workflow_create(payload: dict = {}):
     wid = str(uuid.uuid4())
     name = payload.get("name", "Untitled")
     now = time.time()
-    empty = json.dumps({"version": "1", "global": {"llm": "gemini-3-flash-preview", "human_in_the_loop": False}, "nodes": [], "edges": []})
+    empty = json.dumps(
+        {
+            "version": "1",
+            "global": {"llm": "gemini-3-flash-preview", "human_in_the_loop": False},
+            "nodes": [],
+            "edges": [],
+        }
+    )
     with _db() as con:
-        con.execute("INSERT INTO workflows VALUES (?,?,?,?,?)", (wid, name, empty, now, now))
+        con.execute(
+            "INSERT INTO workflows VALUES (?,?,?,?,?)", (wid, name, empty, now, now)
+        )
     return {"id": wid, "name": name}
 
 
@@ -206,21 +236,30 @@ async def workflow_rename(wid: str, payload: dict):
 
 # ── Workflow graph endpoints ──────────────────────────────────────────────────
 
+
 @app.get("/workflow/load")
 async def workflow_load(id: str | None = None):
     with _db() as con:
         if id:
-            row = con.execute("SELECT graph FROM workflows WHERE id=?", (id,)).fetchone()
+            row = con.execute(
+                "SELECT graph FROM workflows WHERE id=?", (id,)
+            ).fetchone()
         else:
-            row = con.execute("SELECT graph FROM workflows ORDER BY updated DESC LIMIT 1").fetchone()
+            row = con.execute(
+                "SELECT graph FROM workflows ORDER BY updated DESC LIMIT 1"
+            ).fetchone()
     if not row:
         return {"graph": None, "id": None}
     # Also return the id so the frontend knows which workflow is loaded
     with _db() as con:
         if id:
-            meta = con.execute("SELECT id, name FROM workflows WHERE id=?", (id,)).fetchone()
+            meta = con.execute(
+                "SELECT id, name FROM workflows WHERE id=?", (id,)
+            ).fetchone()
         else:
-            meta = con.execute("SELECT id, name FROM workflows ORDER BY updated DESC LIMIT 1").fetchone()
+            meta = con.execute(
+                "SELECT id, name FROM workflows ORDER BY updated DESC LIMIT 1"
+            ).fetchone()
     return {"graph": json.loads(row["graph"]), "id": meta["id"], "name": meta["name"]}
 
 
@@ -245,9 +284,13 @@ async def workflow_generate(payload: dict = {}):
     wid = payload.get("id")
     with _db() as con:
         if wid:
-            row = con.execute("SELECT graph FROM workflows WHERE id=?", (wid,)).fetchone()
+            row = con.execute(
+                "SELECT graph FROM workflows WHERE id=?", (wid,)
+            ).fetchone()
         else:
-            row = con.execute("SELECT graph FROM workflows ORDER BY updated DESC LIMIT 1").fetchone()
+            row = con.execute(
+                "SELECT graph FROM workflows ORDER BY updated DESC LIMIT 1"
+            ).fetchone()
     if not row:
         return {"status": "error", "message": "No workflow found. Create one first."}
     try:
@@ -270,13 +313,20 @@ async def workflow_preview():
 
 # ── SSE execution events ──────────────────────────────────────────────────────
 
+
 @app.get("/events")
 async def events():
     q: asyncio.Queue = asyncio.Queue()
     _state._sse_queues.append(q)
 
     async def stream():
-        snapshot = json.dumps({"type": "snapshot", "statuses": _state.get_node_statuses()})
+        snapshot = json.dumps(
+            {
+                "type": "snapshot",
+                "statuses": _state.get_node_statuses(),
+                "outputs": _state.get_node_outputs(),
+            }
+        )
         yield f"data: {snapshot}\n\n"
         try:
             while True:
@@ -294,6 +344,7 @@ async def events():
 
 # ── Agent control endpoints ───────────────────────────────────────────────────
 
+
 @app.post("/start")
 async def start(id: str | None = None):
     global agent_task, _current_run_id
@@ -303,9 +354,13 @@ async def start(id: str | None = None):
     # Always regenerate workflow.py from current workflow before running
     with _db() as con:
         if id:
-            row = con.execute("SELECT id, name, graph FROM workflows WHERE id=?", (id,)).fetchone()
+            row = con.execute(
+                "SELECT id, name, graph FROM workflows WHERE id=?", (id,)
+            ).fetchone()
         else:
-            row = con.execute("SELECT id, name, graph FROM workflows ORDER BY updated DESC LIMIT 1").fetchone()
+            row = con.execute(
+                "SELECT id, name, graph FROM workflows ORDER BY updated DESC LIMIT 1"
+            ).fetchone()
 
     if not row:
         return {"status": "error", "message": "No workflow found. Create one first."}
@@ -327,7 +382,15 @@ async def start(id: str | None = None):
     with _db() as con:
         con.execute(
             "INSERT INTO runs VALUES (?,?,?,?,?,?,?)",
-            (run_id, workflow_id, workflow_name, time.time(), None, "running", log_path),
+            (
+                run_id,
+                workflow_id,
+                workflow_name,
+                time.time(),
+                None,
+                "running",
+                log_path,
+            ),
         )
     _current_run_id = run_id
 
@@ -427,6 +490,7 @@ async def status():
 
 # ── File manager endpoints ────────────────────────────────────────────────────
 
+
 def _safe_path(rel: str) -> Path:
     """Resolve rel inside FILES_ROOT; raise 400 if it would escape."""
     p = (FILES_ROOT / rel).resolve()
@@ -441,14 +505,18 @@ async def list_files(path: str = ""):
     if not dir_path.exists() or not dir_path.is_dir():
         raise HTTPException(status_code=404, detail="Directory not found")
     entries = []
-    for item in sorted(dir_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-        entries.append({
-            "name": item.name,
-            "path": str(item.relative_to(FILES_ROOT)).replace("\\", "/"),
-            "is_dir": item.is_dir(),
-            "size": item.stat().st_size if item.is_file() else None,
-            "modified": item.stat().st_mtime,
-        })
+    for item in sorted(
+        dir_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())
+    ):
+        entries.append(
+            {
+                "name": item.name,
+                "path": str(item.relative_to(FILES_ROOT)).replace("\\", "/"),
+                "is_dir": item.is_dir(),
+                "size": item.stat().st_size if item.is_file() else None,
+                "modified": item.stat().st_mtime,
+            }
+        )
     return {"path": path, "entries": entries}
 
 
@@ -460,7 +528,10 @@ async def upload_file(path: str = "", file: UploadFile = File(...)):
     with open(dest, "wb") as f:
         while chunk := await file.read(1024 * 1024):
             f.write(chunk)
-    return {"status": "uploaded", "path": str(dest.relative_to(FILES_ROOT)).replace("\\", "/")}
+    return {
+        "status": "uploaded",
+        "path": str(dest.relative_to(FILES_ROOT)).replace("\\", "/"),
+    }
 
 
 @app.get("/files/download")
@@ -490,4 +561,5 @@ async def delete_file(path: str):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("backend:app", host="0.0.0.0", port=8000, reload=False)

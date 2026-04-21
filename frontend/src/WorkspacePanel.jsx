@@ -8,13 +8,89 @@ import NodeConfigPanel from './NodeConfigPanel';
 
 const DEFAULT_GRAPH = {
   version: '1',
-  global: {
-    llm: 'gemini-3-flash-preview',
-    human_in_the_loop: false,
-  },
+  global: { llm: 'gemini-3-flash-preview', human_in_the_loop: false },
   nodes: [],
   edges: [],
 };
+
+const TEMPLATES = [
+  {
+    name: 'Web Scrape',
+    icon: '»',
+    desc: 'Navigate to a page, extract structured data',
+    graph: {
+      version: '1',
+      global: { llm: 'gemini-3-flash-preview', human_in_the_loop: false },
+      nodes: [
+        { id: 'n1', type: 'Navigate', label: 'Open page', position: { x: 180, y: 60 }, config: { target: 'https://example.com', max_steps: null, extra_info: '', llm: null } },
+        { id: 'n2', type: 'Read', label: 'Extract data', position: { x: 180, y: 200 }, config: { task: 'Extract the main heading and description', max_steps: null, llm: null },
+          output_schema: { fields: [{ name: 'heading', type: 'str' }, { name: 'description', type: 'str' }] } },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1', target: 'n2', type: 'sequential', sourceHandle: 'handle-out', targetHandle: 'handle-in' },
+      ],
+    },
+  },
+  {
+    name: 'Login & Fill',
+    icon: '≡',
+    desc: 'Log into a site and submit a form',
+    graph: {
+      version: '1',
+      global: { llm: 'gemini-3-flash-preview', human_in_the_loop: false },
+      nodes: [
+        { id: 'n1', type: 'Navigate', label: 'Open login page', position: { x: 180, y: 60 }, config: { target: 'https://example.com/login', max_steps: null, extra_info: '', llm: null } },
+        { id: 'n2', type: 'Fill', label: 'Fill login form', position: { x: 180, y: 200 }, config: { target: 'login form', data: { email: '{{secrets.EMAIL}}', password: '{{secrets.PASSWORD}}' }, llm: null } },
+        { id: 'n3', type: 'Check', label: 'Logged in?', position: { x: 180, y: 340 }, config: { condition: 'We are now logged in and past the login page', max_steps: null, llm: null } },
+        { id: 'n4', type: 'Do', label: 'Submit form', position: { x: 320, y: 460 }, config: { task: 'Fill and submit the main form on the page', max_steps: null, extra_info: '', llm: null } },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1', target: 'n2', type: 'sequential', sourceHandle: 'handle-out', targetHandle: 'handle-in' },
+        { id: 'e2', source: 'n2', target: 'n3', type: 'sequential', sourceHandle: 'handle-out', targetHandle: 'handle-in' },
+        { id: 'e3', source: 'n3', target: 'n4', type: 'conditional_true', sourceHandle: 'true', targetHandle: 'handle-in' },
+      ],
+    },
+  },
+  {
+    name: 'Retry Loop',
+    icon: '↺',
+    desc: 'Repeat an action until a condition passes',
+    graph: {
+      version: '1',
+      global: { llm: 'gemini-3-flash-preview', human_in_the_loop: false },
+      nodes: [
+        { id: 'n1', type: 'Navigate', label: 'Open page',      position: { x: 180, y: 60  }, config: { target: 'https://example.com', max_steps: null, extra_info: '', llm: null } },
+        { id: 'n2', type: 'Check',    label: 'Succeeded?',     position: { x: 180, y: 200 }, config: { condition: 'The action completed successfully and the expected result is visible', max_steps: null, llm: null } },
+        { id: 'n3', type: 'Do',       label: 'Perform action', position: { x: 340, y: 340 }, config: { task: 'Click the main call-to-action button', max_steps: null, extra_info: '', llm: null } },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1', target: 'n2', type: 'sequential',        sourceHandle: 'handle-out', targetHandle: 'handle-in' },
+        { id: 'e2', source: 'n2', target: 'n3', type: 'conditional_false', sourceHandle: 'false',      targetHandle: 'handle-in' },
+        { id: 'e3', source: 'n3', target: 'n2', type: 'loop_back',         sourceHandle: 'handle-out', targetHandle: 'handle-in', max_iterations: 3 },
+      ],
+    },
+  },
+  {
+    name: 'CSV Batch',
+    icon: '↺',
+    desc: 'Load a CSV and process each row',
+    graph: {
+      version: '1',
+      global: { llm: 'gemini-3-flash-preview', human_in_the_loop: false },
+      nodes: [
+        { id: 'n1', type: 'Code',    label: 'Load CSV',      position: { x: 180, y: 60  }, config: { code: "import csv\nwith open('/workspace/uploads/data.csv') as f:\n    rows = list(csv.DictReader(f))", llm: null } },
+        { id: 'n2', type: 'ForEach', label: 'For each row',  position: { x: 180, y: 200 }, config: { items_expr: 'rows', loop_var: 'row', llm: null } },
+        { id: 'n3', type: 'Do',      label: 'Process row',   position: { x: 60,  y: 340 }, config: { task: 'Process the current item: {{row}}', max_steps: null, extra_info: '', llm: null } },
+        { id: 'n4', type: 'Do',      label: 'After loop',    position: { x: 180, y: 460 }, config: { task: 'All rows processed. Do any final steps.', max_steps: null, extra_info: '', llm: null } },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1', target: 'n2', type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e2', source: 'n2', target: 'n3', type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e3', source: 'n2', target: 'n4', type: 'foreach_done', sourceHandle: 'handle-foreach-done', targetHandle: 'handle-in' },
+      ],
+    },
+  },
+];
 
 const TYPE_CONFIG = {
   Navigate: { target: '', max_steps: null, extra_info: '', llm: null },
@@ -70,11 +146,13 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   const [loading, setLoading] = useState(true);
   const [backendAvailable, setBackendAvailable] = useState(true);
   const [nodeStatuses, setNodeStatuses] = useState({});
+  const [nodeOutputs, setNodeOutputs] = useState({});
   const [bottomTab, setBottomTab] = useState('preview');
   const [runs, setRuns] = useState([]);
   const [logModal, setLogModal] = useState(null); // {runId, content}
   const [filePath, setFilePath] = useState('');
   const [fileEntries, setFileEntries] = useState([]);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [errorToast, setErrorToast] = useState(null);
   const errorToastTimer = useRef(null);
   const autosaveTimer = useRef(null);
@@ -158,17 +236,21 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
     }
   };
 
-  const handleWorkflowCreate = async () => {
+  const handleWorkflowCreate = async (template = null) => {
+    setShowTemplatePicker(false);
     try {
-      const created = await createWorkflow('Untitled');
+      const name = template ? template.name : 'Untitled';
+      const created = await createWorkflow(name);
+      const initialGraph = template ? template.graph : DEFAULT_GRAPH;
+      await saveGraph(created.id, initialGraph);
       const wlist = await listWorkflows();
       setWorkflows(wlist);
-      // Switch to new workflow
       setCurrentWorkflowId(created.id);
-      setGraph(DEFAULT_GRAPH);
+      setGraph(initialGraph);
       setSelectedNodeId(null);
       setStatus('New workflow created.');
       setNodeStatuses({});
+      setNodeOutputs({});
     } catch {
       setStatus('Failed to create workflow.');
     }
@@ -383,8 +465,12 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       const data = JSON.parse(e.data);
       if (data.type === 'reset') {
         setNodeStatuses({});
+        setNodeOutputs({});
       } else if (data.type === 'snapshot') {
         setNodeStatuses(data.statuses || {});
+        setNodeOutputs(data.outputs || {});
+      } else if (data.type === 'node_output') {
+        setNodeOutputs(prev => ({ ...prev, [data.node_id]: data.output }));
       } else if (data.node_id === '__workflow__') {
         const terminal = data.status === 'error' || data.status === 'stopped';
         if (terminal) {
@@ -403,6 +489,13 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   }, [onStart, currentWorkflowId]);
 
   useEffect(() => () => esRef.current?.close(), []);
+
+  useEffect(() => {
+    if (!showTemplatePicker) return;
+    const handler = (e) => { if (e.key === 'Escape') setShowTemplatePicker(false); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showTemplatePicker]);
 
   const fetchPreview = async () => {
     try {
@@ -482,11 +575,44 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
           >×</button>
         </div>
       )}
+      {showTemplatePicker && (
+        <div
+          onClick={() => setShowTemplatePicker(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 12, padding: '24px 24px 20px', width: 440, boxShadow: '0 8px 40px rgba(0,0,0,0.18)' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>New workflow</div>
+            <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>Start from a template or a blank canvas.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+              {TEMPLATES.map(t => (
+                <button
+                  key={t.name}
+                  onClick={() => handleWorkflowCreate(t)}
+                  style={{ textAlign: 'left', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #e5e4e0', background: '#fafaf9', cursor: 'pointer' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = '#1a1a1a'; e.currentTarget.style.background = '#f4f3f0'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = '#e5e4e0'; e.currentTarget.style.background = '#fafaf9'; }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 2 }}>{t.name}</div>
+                  <div style={{ fontSize: 11, color: '#888', lineHeight: 1.4 }}>{t.desc}</div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => handleWorkflowCreate(null)}
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 7, border: '1px solid #e5e4e0', background: '#fff', fontSize: 12, color: '#555', cursor: 'pointer', textAlign: 'center' }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f4f3f0'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = '#fff'; }}
+            >
+              Blank workflow
+            </button>
+          </div>
+        </div>
+      )}
       <WorkflowSelector
         workflows={workflows}
         currentId={currentWorkflowId}
         onSelect={handleWorkflowSelect}
-        onCreate={handleWorkflowCreate}
+        onCreate={() => setShowTemplatePicker(true)}
         onDelete={handleWorkflowDelete}
         onRename={handleWorkflowRename}
       />
@@ -517,6 +643,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
                 onEdgeDelete={handleEdgeDelete}
                 selectedNodeId={selectedNodeId}
                 nodeStatuses={nodeStatuses}
+                nodeOutputs={nodeOutputs}
               />
             </div>
             <div style={{ flex: `0 0 ${bottomTab === 'files' ? 320 : 160}px`, margin: '0 8px 8px', background: '#0d1117', borderRadius: 10, border: '1px solid #30363d', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

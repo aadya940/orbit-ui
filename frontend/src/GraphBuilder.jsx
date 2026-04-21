@@ -70,7 +70,7 @@ const EDGE_STROKE = {
   foreach_done:      '#94a3b8',
 };
 
-export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onConnect, onSelectNode, onEdgeDelete, selectedNodeId, nodeStatuses = {} }) {
+export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onConnect, onSelectNode, onEdgeDelete, selectedNodeId, nodeStatuses = {}, nodeOutputs = {} }) {
   // Keep a ref so edge components always call the latest callback, never a stale closure
   const onEdgeDeleteRef = useRef(onEdgeDelete);
   useEffect(() => { onEdgeDeleteRef.current = onEdgeDelete; }, [onEdgeDelete]);
@@ -90,9 +90,10 @@ export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onCo
           label: node.label,
           preview: node.config?.target || node.config?.task || node.config?.condition || node.config?.code || node.config?.class_name || '',
           status: nodeStatuses[node.id] || null,
+          output: nodeOutputs[node.id] ?? null,
         },
       })),
-    [graph.nodes, nodeStatuses]
+    [graph.nodes, nodeStatuses, nodeOutputs]
   );
 
   const flowEdges = useMemo(

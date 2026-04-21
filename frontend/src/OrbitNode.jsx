@@ -25,6 +25,23 @@ function truncate(str, n = 26) {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
+function formatOutput(output) {
+  if (output === null || output === undefined) return null;
+  if (Array.isArray(output)) return [`[${output.length} item${output.length !== 1 ? 's' : ''}]`];
+  if (typeof output === 'object') {
+    const entries = Object.entries(output).slice(0, 3);
+    const lines = entries.map(([k, v]) => {
+      const val = typeof v === 'string' ? v : JSON.stringify(v);
+      const short = val.length > 22 ? val.slice(0, 22) + '…' : val;
+      return `${k}: ${short}`;
+    });
+    if (Object.keys(output).length > 3) lines.push('…');
+    return lines;
+  }
+  const s = String(output);
+  return [s.length > 40 ? s.slice(0, 40) + '…' : s];
+}
+
 export default function OrbitNode({ data, selected }) {
   const meta = TYPE_META[data.nodeType] || { icon: '•', color: '#888' };
   const preview = truncate(data.preview);
@@ -127,6 +144,34 @@ export default function OrbitNode({ data, selected }) {
           {preview}
         </div>
       )}
+
+      {/* Output pill */}
+      {data.output != null && (() => {
+        const lines = formatOutput(data.output);
+        if (!lines) return null;
+        return (
+          <div style={{
+            marginTop: 7,
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: 6,
+            padding: '4px 7px',
+            textAlign: 'left',
+          }}>
+            {lines.map((line, i) => (
+              <div key={i} style={{
+                fontSize: 10,
+                fontFamily: "'Geist Mono', Consolas, monospace",
+                color: '#166534',
+                lineHeight: 1.5,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>{line}</div>
+            ))}
+          </div>
+        );
+      })()}
 
       {data.nodeType === 'Check' && (
         <>

@@ -22,12 +22,21 @@ class CodegenError(Exception):
 
 # ── Graph data structures ────────────────────────────────────────────────────
 
+
 @dataclass
 class SchemaField:
     name: str
     type: str  # "str" | "int" | "float" | "bool"
 
-    VALID_TYPES = {"str", "int", "float", "bool", "list[str]", "list[int]", "list[float]"}
+    VALID_TYPES = {
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list[str]",
+        "list[int]",
+        "list[float]",
+    }
 
     def python_type(self) -> str:
         if self.type not in self.VALID_TYPES:
@@ -53,7 +62,16 @@ class Node:
     config: dict[str, Any]
     output_schema: OutputSchema | None
 
-    VALID_TYPES = {"Do", "Navigate", "Check", "Fill", "Read", "Code", "Agent", "ForEach"}
+    VALID_TYPES = {
+        "Do",
+        "Navigate",
+        "Check",
+        "Fill",
+        "Read",
+        "Code",
+        "Agent",
+        "ForEach",
+    }
 
 
 @dataclass
@@ -64,7 +82,13 @@ class Edge:
     type: str  # sequential | conditional_true | conditional_false | loop_back
     max_iterations: int = 3
 
-    VALID_TYPES = {"sequential", "conditional_true", "conditional_false", "loop_back", "foreach_done"}
+    VALID_TYPES = {
+        "sequential",
+        "conditional_true",
+        "conditional_false",
+        "loop_back",
+        "foreach_done",
+    }
 
 
 @dataclass
@@ -77,13 +101,15 @@ class GlobalConfig:
 @dataclass
 class LoopGroup:
     """A retry loop detected from a loop_back edge."""
-    header: str        # node the back-edge points TO (the Check node)
-    body: list[str]    # nodes between header and tail in topo order
-    tail: str          # node the back-edge comes FROM
+
+    header: str  # node the back-edge points TO (the Check node)
+    body: list[str]  # nodes between header and tail in topo order
+    tail: str  # node the back-edge comes FROM
     max_iterations: int
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
+
 
 def parse_graph(data: dict) -> tuple[GlobalConfig, list[Node], list[Edge]]:
     """Parse the graph JSON into typed objects."""
@@ -98,7 +124,10 @@ def parse_graph(data: dict) -> tuple[GlobalConfig, list[Node], list[Edge]]:
         schema = None
         if nd.get("output_schema") and nd["output_schema"].get("fields"):
             schema = OutputSchema(
-                fields=[SchemaField(f["name"], f["type"]) for f in nd["output_schema"]["fields"]]
+                fields=[
+                    SchemaField(f["name"], f["type"])
+                    for f in nd["output_schema"]["fields"]
+                ]
             )
         node = Node(
             id=nd["id"],
@@ -130,6 +159,7 @@ def parse_graph(data: dict) -> tuple[GlobalConfig, list[Node], list[Edge]]:
 
 # ── Graph analysis ───────────────────────────────────────────────────────────
 
+
 def _build_adjacency(
     nodes: list[Node], edges: list[Edge]
 ) -> tuple[dict[str, list[Edge]], dict[str, list[Edge]]]:
@@ -146,12 +176,14 @@ def _detect_loops(edges: list[Edge]) -> list[LoopGroup]:
     loops = []
     for e in edges:
         if e.type == "loop_back":
-            loops.append(LoopGroup(
-                header=e.target,
-                body=[],  # filled during topo sort
-                tail=e.source,
-                max_iterations=e.max_iterations,
-            ))
+            loops.append(
+                LoopGroup(
+                    header=e.target,
+                    body=[],  # filled during topo sort
+                    tail=e.source,
+                    max_iterations=e.max_iterations,
+                )
+            )
     # Check for nested loops (not supported in v1)
     if len(loops) > 1:
         headers = {lg.header for lg in loops}
@@ -264,7 +296,8 @@ def _topo_sort(
             if e.source in missing and e.target in missing
         ]
         detail = (
-            f" Cycle edges: {cycle_edges}." if cycle_edges
+            f" Cycle edges: {cycle_edges}."
+            if cycle_edges
             else " Check for edges connecting nodes in a circle."
         )
         raise CodegenError(
@@ -279,12 +312,18 @@ def _topo_sort(
 
     # Fill loop body lists using DFS reachability instead of index slicing
     for lg in loops:
-        if lg.header not in {n.id for n in nodes} or lg.tail not in {n.id for n in nodes}:
-            raise CodegenError(f"Loop references unknown node (header={lg.header!r}, tail={lg.tail!r})")
+        if lg.header not in {n.id for n in nodes} or lg.tail not in {
+            n.id for n in nodes
+        }:
+            raise CodegenError(
+                f"Loop references unknown node (header={lg.header!r}, tail={lg.tail!r})"
+            )
         h_idx = order.index(lg.header) if lg.header in order else -1
         t_idx = order.index(lg.tail) if lg.tail in order else -1
         if h_idx == -1 or t_idx == -1:
-            raise CodegenError(f"Loop header/tail not in topo order: {lg.header!r}, {lg.tail!r}")
+            raise CodegenError(
+                f"Loop header/tail not in topo order: {lg.header!r}, {lg.tail!r}"
+            )
         if h_idx > t_idx:
             raise CodegenError(
                 f"loop_back edge target {lg.header!r} must come before source "
@@ -316,9 +355,7 @@ _TEMPLATE_RE = re.compile(r"\{\{(\w+)\.(\w+)\}\}")
 _BARE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
-def _resolve_all(
-    text: str, nodes_by_id: dict[str, Node]
-) -> tuple[str, bool]:
+def _resolve_all(text: str, nodes_by_id: dict[str, Node]) -> tuple[str, bool]:
     """Run both secrets and node-template resolution. Returns (text, uses_fstring)."""
     text, is_secret = _resolve_secrets(text)
     text, is_template = _resolve_templates(text, nodes_by_id)
@@ -330,9 +367,7 @@ def _resolve_all(
     return text, (is_secret or is_template)
 
 
-def _resolve_templates(
-    text: str, nodes_by_id: dict[str, Node]
-) -> tuple[str, bool]:
+def _resolve_templates(text: str, nodes_by_id: dict[str, Node]) -> tuple[str, bool]:
     """Replace {{node_id.field}} with {node_id_out.field}.
 
     Returns (resolved_text, uses_fstring).
@@ -344,7 +379,9 @@ def _resolve_templates(
         node_id, field_name = m.group(1), m.group(2)
         node = nodes_by_id.get(node_id)
         if not node:
-            raise CodegenError(f"Template {{{{{{node_id}}.{field_name}}}}} references unknown node {node_id!r}")
+            raise CodegenError(
+                f"Template {{{{{{node_id}}.{field_name}}}}} references unknown node {node_id!r}"
+            )
         if not node.output_schema:
             raise CodegenError(
                 f"Template {{{{{{node_id}}.{field_name}}}}} references node {node_id!r} "
@@ -365,6 +402,7 @@ def _resolve_templates(
 
 
 # ── Code emission ────────────────────────────────────────────────────────────
+
 
 def _emit_pydantic_models(nodes: list[Node]) -> list[str]:
     """Generate Pydantic model classes for nodes with output_schema."""
@@ -407,11 +445,15 @@ def _mcp_open_lines(node: Node, indent: int) -> tuple[list[str], list[str], int]
         transport = srv.get("transport", "stdio")
         if transport == "sse":
             url = srv.get("url", "")
-            open_lines.append(f"{pad}async with _MCPToolset.from_server(_SseServerParams(url={url!r})) as _mcp_{node.id}_{idx}:")
+            open_lines.append(
+                f"{pad}async with _MCPToolset.from_server(_SseServerParams(url={url!r})) as _mcp_{node.id}_{idx}:"
+            )
         else:
             cmd = srv.get("command", "")
             args = srv.get("args") or []
-            open_lines.append(f"{pad}async with _MCPToolset.from_server(_StdioParams(command={cmd!r}, args={args!r})) as _mcp_{node.id}_{idx}:")
+            open_lines.append(
+                f"{pad}async with _MCPToolset.from_server(_StdioParams(command={cmd!r}, args={args!r})) as _mcp_{node.id}_{idx}:"
+            )
     inner_indent = indent + len(servers)
     return open_lines, inner_indent
 
@@ -480,7 +522,7 @@ def _emit_node(
     if extra_info and node.type in ("Do", "Navigate", "Read", "Fill", "Agent"):
         # prev_output_var injection uses {str(...)} — emit as f-string, manual extra_info as plain string
         if extra_info.startswith("{") and extra_info.endswith("}"):
-            common += f", extra_info=f\"{extra_info}\""
+            common += f', extra_info=f"{extra_info}"'
         else:
             common += f", extra_info={extra_info!r}"
 
@@ -496,15 +538,19 @@ def _emit_node(
         q = "f" if is_fstr else ""
         if node.output_schema:
             lines.append(f"{vpad}_{node.id}_result = await Navigate(")
-            lines.append(f"{vpad}    {q}\"{target}\", {common},")
+            lines.append(f'{vpad}    {q}"{target}", {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
             lines.append(f"{vpad}_{node.id}_result = await Navigate(")
-            lines.append(f"{vpad}    {q}\"{target}\", {common},")
+            lines.append(f'{vpad}    {q}"{target}", {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
 
     elif node.type == "Do":
         task = node.config.get("task", "").strip()
@@ -514,16 +560,20 @@ def _emit_node(
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
             lines.append(f"{vpad}_{node.id}_result = await Do(")
-            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}    output_schema={cls_name},")
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
             lines.append(f"{vpad}_{node.id}_result = await Do(")
-            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
 
     elif node.type == "Read":
         task = node.config.get("task", "").strip()
@@ -533,15 +583,19 @@ def _emit_node(
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
             lines.append(f"{vpad}_{node.id}_result = await Read(")
-            lines.append(f"{vpad}    {q}\"{task}\", schema={cls_name}, {common},")
+            lines.append(f'{vpad}    {q}"{task}", schema={cls_name}, {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
             lines.append(f"{vpad}_{node.id}_result = await Read(")
-            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
 
     elif node.type == "Fill":
         target = node.config.get("target", "").strip()
@@ -559,13 +613,17 @@ def _emit_node(
         is_fstr = is_fstr_target or is_fstr_data
         q = "f" if is_fstr else ""
         # Build data dict literal — use f-string for values that contain {…}
-        data_items = ", ".join(f"{k!r}: {q}\"{_esc(v)}\"" for k, v in resolved_data.items())
+        data_items = ", ".join(
+            f'{k!r}: {q}"{_esc(v)}"' for k, v in resolved_data.items()
+        )
         lines.append(f"{vpad}_{node.id}_result = await Fill(")
-        lines.append(f"{vpad}    {q}\"{target}\",")
+        lines.append(f'{vpad}    {q}"{target}",')
         lines.append(f"{vpad}    data={{{data_items}}},")
         lines.append(f"{vpad}    {common},")
         lines.append(f"{vpad}).run()")
-        lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+        lines.append(
+            f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+        )
 
     elif node.type == "Agent":
         class_name = node.config.get("class_name", "CustomVerb").strip()
@@ -575,21 +633,29 @@ def _emit_node(
         q = "f" if is_fstr else ""
         if node.output_schema:
             lines.append(f"{vpad}_{node.id}_result = await {class_name}(")
-            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
             lines.append(f"{vpad}_{node.id}_result = await {class_name}(")
-            lines.append(f"{vpad}    {q}\"{task}\", {common},")
+            lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
-            lines.append(f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)")
+            lines.append(
+                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            )
 
     elif node.type == "Check":
         # Check is handled at the control-flow level, not here
         pass
 
     if node.type not in ("Check", "Code"):
+        if node.output_schema:
+            lines.append(
+                f'{vpad}report_node_output("{node.id}", _{node.id}_result.output.__dict__ if hasattr(_{node.id}_result.output, "__dict__") else _{node.id}_result.output)'
+            )
         lines.append(f'{vpad}report_node("{node.id}", "success")')
 
     return lines
@@ -613,6 +679,7 @@ def _emit_check_expr(
 
 
 # ── Recursive subgraph emission ──────────────────────────────────────────────
+
 
 def _emit_loop_group(
     lg: LoopGroup,
@@ -639,26 +706,62 @@ def _emit_loop_group(
         # Pattern A: Check is the loop header (check-first retry)
         for body_nid in lg.body:
             body_node = nodes_by_id[body_nid]
-            lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+            lines.extend(
+                _emit_node(
+                    body_node,
+                    global_cfg,
+                    nodes_by_id,
+                    inner_indent,
+                    log_file_path,
+                    ctx["prev_output_var"][0],
+                )
+            )
             if body_node.output_schema:
                 ctx["prev_output_var"][0] = f"{body_nid}_out"
             emitted.add(body_nid)
 
         if tail_node.type != "Check":
-            lines.extend(_emit_node(tail_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+            lines.extend(
+                _emit_node(
+                    tail_node,
+                    global_cfg,
+                    nodes_by_id,
+                    inner_indent,
+                    log_file_path,
+                    ctx["prev_output_var"][0],
+                )
+            )
             if tail_node.output_schema:
                 ctx["prev_output_var"][0] = f"{lg.tail}_out"
         emitted.add(lg.tail)
         check_node, check_nid = header_node, lg.header
     else:
         # Pattern B: non-Check header (e.g. Navigate → Check)
-        lines.extend(_emit_node(header_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+        lines.extend(
+            _emit_node(
+                header_node,
+                global_cfg,
+                nodes_by_id,
+                inner_indent,
+                log_file_path,
+                ctx["prev_output_var"][0],
+            )
+        )
         if header_node.output_schema:
             ctx["prev_output_var"][0] = f"{lg.header}_out"
 
         for body_nid in lg.body:
             body_node = nodes_by_id[body_nid]
-            lines.extend(_emit_node(body_node, global_cfg, nodes_by_id, inner_indent, log_file_path, ctx["prev_output_var"][0]))
+            lines.extend(
+                _emit_node(
+                    body_node,
+                    global_cfg,
+                    nodes_by_id,
+                    inner_indent,
+                    log_file_path,
+                    ctx["prev_output_var"][0],
+                )
+            )
             if body_node.output_schema:
                 ctx["prev_output_var"][0] = f"{body_nid}_out"
             emitted.add(body_nid)
@@ -675,19 +778,22 @@ def _emit_loop_group(
     lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
     lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
     lines.append(f"{inner_pad}if {check_expr}:")
+    lines.append(f'{break_pad}report_node("{check_nid}", "success")')
 
     # Determine what follows the loop (conditional_true target outside loop)
     cond = ctx["conditionals"].get(check_nid, {})
     true_target = cond.get("true")
     loop_inner = ctx["loop_inner_members"]
+    # Always break when Check passes — that's how the loop exits on success.
+    # true_target (if any, outside the loop) is what runs after the break.
+    lines.append(f"{break_pad}break")
     if true_target and true_target not in loop_inner:
-        lines.append(f"{break_pad}break")
         after_loop_nid: str | None = true_target
     else:
-        lines.append(f"{break_pad}pass")
         # Fall through to sequential successors of tail outside the loop
         seq_after = [
-            e.target for e in ctx["out_edges"].get(check_nid, [])
+            e.target
+            for e in ctx["out_edges"].get(check_nid, [])
             if e.type == "sequential" and e.target not in loop_inner
         ]
         after_loop_nid = seq_after[0] if seq_after else None
@@ -695,7 +801,9 @@ def _emit_loop_group(
     lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
     lines.append(f"{break_pad}await asyncio.sleep(3)")
     lines.append(f"{loop_pad}else:")
-    lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+    lines.append(
+        f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")'
+    )
     lines.append(f"{loop_pad}    return")
 
     return lines, after_loop_nid
@@ -729,11 +837,15 @@ def _emit_subgraph(
             lines.append(f"{pad}for {loop_var} in ({items_expr}):")
 
             # Body: all non-foreach_done, non-loop_back outgoing edges
-            body_targets = [e.target for e in out if e.type not in ("foreach_done", "loop_back")]
+            body_targets = [
+                e.target for e in out if e.type not in ("foreach_done", "loop_back")
+            ]
             for body_start in body_targets:
-                lines.extend(_emit_subgraph(body_start, indent + 1, emitted, stop_set, ctx))
+                lines.extend(
+                    _emit_subgraph(body_start, indent + 1, emitted, stop_set, ctx)
+                )
 
-            lines.append(f"{pad}    report_node({nid!r}, 'success')")
+            lines.append(f"{pad}report_node({nid!r}, 'success')")
 
             # After loop: foreach_done edge
             done = [e.target for e in out if e.type == "foreach_done"]
@@ -761,21 +873,30 @@ def _emit_subgraph(
 
             true_target = cond.get("true")
             false_target = cond.get("false")
-            merge = _find_merge_point(true_target, false_target, ctx["out_edges"], ctx["topo_order"])
+            merge = _find_merge_point(
+                true_target, false_target, ctx["out_edges"], ctx["topo_order"]
+            )
             branch_stop = stop_set | ({merge} if merge else set())
 
-            true_lines = _emit_subgraph(true_target, indent + 1, emitted, branch_stop, ctx) if true_target else []
+            true_lines = (
+                _emit_subgraph(true_target, indent + 1, emitted, branch_stop, ctx)
+                if true_target
+                else []
+            )
             if true_lines:
                 lines.extend(true_lines)
             else:
                 lines.append(f"{'    ' * (indent + 1)}pass")
 
             if false_target:
-                false_lines = _emit_subgraph(false_target, indent + 1, emitted, branch_stop, ctx)
+                false_lines = _emit_subgraph(
+                    false_target, indent + 1, emitted, branch_stop, ctx
+                )
                 if false_lines:
                     lines.append(f"{pad}else:")
                     lines.extend(false_lines)
 
+            lines.append(f'{pad}report_node("{nid}", "success")')
             nid = merge
             continue
 
@@ -786,8 +907,12 @@ def _emit_subgraph(
         # ── Regular node ──────────────────────────────────────────────────────
         emitted.add(nid)
         node_lines = _emit_node(
-            node, ctx["global_cfg"], ctx["nodes_by_id"],
-            indent, ctx["log_file_path"], ctx["prev_output_var"][0],
+            node,
+            ctx["global_cfg"],
+            ctx["nodes_by_id"],
+            indent,
+            ctx["log_file_path"],
+            ctx["prev_output_var"][0],
         )
         lines.extend(node_lines)
         if node.output_schema:
@@ -801,6 +926,7 @@ def _emit_subgraph(
 
 
 # ── Main generation ──────────────────────────────────────────────────────────
+
 
 def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     """Generate workflow.py source code from graph JSON."""
@@ -843,7 +969,9 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         "global_cfg": global_cfg,
         "log_file_path": log_file_path,
         "topo_order": order,
-        "prev_output_var": [None],  # mutable single-element list so recursive calls share state
+        "prev_output_var": [
+            None
+        ],  # mutable single-element list so recursive calls share state
     }
 
     # ── Emit file ─────────────────────────────────────────────────────────
@@ -867,6 +995,7 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
             if isinstance(v, (str, dict))
             for v in ([v] if isinstance(v, str) else v.values())
         )
+
     has_secrets = any(_has_secrets(n.config) for n in nodes)
     if has_secrets:
         lines.append("import os")
@@ -878,9 +1007,15 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     # MCP toolset import (only if any node uses mcp_servers)
     has_mcp = any(n.config.get("mcp_servers") for n in nodes)
     if has_mcp:
-        lines.append("from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset as _MCPToolset")
-        lines.append("from google.adk.tools.mcp_tool.mcp_toolset import StdioServerParameters as _StdioParams")
-        lines.append("from google.adk.tools.mcp_tool.mcp_toolset import SseServerParams as _SseServerParams")
+        lines.append(
+            "from google.adk.tools.mcp_tool.mcp_toolset import MCPToolset as _MCPToolset"
+        )
+        lines.append(
+            "from google.adk.tools.mcp_tool.mcp_toolset import StdioServerParameters as _StdioParams"
+        )
+        lines.append(
+            "from google.adk.tools.mcp_tool.mcp_toolset import SseServerParams as _SseServerParams"
+        )
 
     # ForEach generates a plain Python for-loop — no orbit class to import
     verb_types = {n.type for n in nodes if n.type not in ("Code", "Agent", "ForEach")}
@@ -895,10 +1030,10 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         lines.append(f"from orbit import {', '.join(orbit_imports)}, session")
     else:
         lines.append("from orbit import session")
-    lines.append("from state import pause_event, report_node")
+    lines.append("from state import pause_event, report_node, report_node_output")
     lines.append("")
     if log_file_path:
-        lines.append(f'_LOG_FILE = {log_file_path!r}')
+        lines.append(f"_LOG_FILE = {log_file_path!r}")
         lines.append("")
 
     # Pydantic models (for nodes with output_schema, excluding Agent nodes which handle their own)
@@ -915,7 +1050,9 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
         if not class_name:
             raise CodegenError(f"Agent node {node.id!r}: class_name is required")
         if not class_name.isidentifier():
-            raise CodegenError(f"Agent node {node.id!r}: {class_name!r} is not a valid Python identifier")
+            raise CodegenError(
+                f"Agent node {node.id!r}: {class_name!r} is not a valid Python identifier"
+            )
         if not prompt_template:
             raise CodegenError(f"Agent node {node.id!r}: prompt_template is required")
         # Pydantic output model
@@ -945,19 +1082,21 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
     lines.append("")
     lines.append("async def main(pause_event):")
     lines.append(f'    model = "{global_cfg.llm}"')
-    lines.append(f'    verbose = {global_cfg.verbose}')
+    lines.append(f"    verbose = {global_cfg.verbose}")
     lines.append("")
     if log_file_path:
-        lines.append('    import sys as _sys')
-        lines.append('    _log_fh = open(_LOG_FILE, "w", encoding="utf-8", buffering=1)')
-        lines.append('    class _WFTee:')
-        lines.append('        def __init__(self, a, b): self._a, self._b = a, b')
-        lines.append('        def write(self, d): self._a.write(d); self._b.write(d)')
-        lines.append('        def flush(self): self._a.flush(); self._b.flush()')
-        lines.append('        def __getattr__(self, n): return getattr(self._a, n)')
-        lines.append('    _sys.stdout = _WFTee(_sys.__stdout__, _log_fh)')
-        lines.append('    _sys.stderr = _WFTee(_sys.__stderr__, _log_fh)')
-        lines.append('')
+        lines.append("    import sys as _sys")
+        lines.append(
+            '    _log_fh = open(_LOG_FILE, "w", encoding="utf-8", buffering=1)'
+        )
+        lines.append("    class _WFTee:")
+        lines.append("        def __init__(self, a, b): self._a, self._b = a, b")
+        lines.append("        def write(self, d): self._a.write(d); self._b.write(d)")
+        lines.append("        def flush(self): self._a.flush(); self._b.flush()")
+        lines.append("        def __getattr__(self, n): return getattr(self._a, n)")
+        lines.append("    _sys.stdout = _WFTee(_sys.__stdout__, _log_fh)")
+        lines.append("    _sys.stderr = _WFTee(_sys.__stderr__, _log_fh)")
+        lines.append("")
     lines.append("    async with session() as s:")
 
     # Find root nodes: no incoming DAG edges (excluding loop_back) and not loop inner members
@@ -967,7 +1106,8 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
             dag_in_degree[e.target] = dag_in_degree.get(e.target, 0) + 1
 
     roots = [
-        nid for nid in order
+        nid
+        for nid in order
         if dag_in_degree.get(nid, 0) == 0 and nid not in loop_inner_members
     ]
 
@@ -978,7 +1118,9 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
             lines.extend(_emit_subgraph(root, 2, emitted, set(), ctx))
 
     lines.append("        report_node('__workflow__', 'success')")
-    lines.append("        print('Workflow completed. Holding screen open... (Click Stop in UI to exit)')")
+    lines.append(
+        "        print('Workflow completed. Holding screen open... (Click Stop in UI to exit)')"
+    )
     lines.append("        try:")
     lines.append("            while True:")
     lines.append("                await asyncio.sleep(1)")
@@ -996,6 +1138,7 @@ def generate(graph_data: dict, log_file_path: str | None = None) -> str:
 
 
 # ── CLI entry point ──────────────────────────────────────────────────────────
+
 
 def generate_from_file(
     input_path: str = "/workspace/workflow.json",
