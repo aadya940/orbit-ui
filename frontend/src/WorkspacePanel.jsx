@@ -101,6 +101,7 @@ const TYPE_CONFIG = {
   Code: { code: '', llm: null },
   Agent: { class_name: '', task: '', prompt_template: '', max_steps: 20, llm: null },
   ForEach: { items_expr: '', loop_var: 'item', llm: null },
+  Bootstrap: { packages: '' },
 };
 
 function createNode(type) {

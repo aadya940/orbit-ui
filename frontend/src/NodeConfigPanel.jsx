@@ -134,6 +134,7 @@ const TYPE_COLORS = {
   Read: "#0891b2",
   Code: "#6b7280",
   Agent: "#7c3aed",
+  Bootstrap: "#b45309",
 };
 
 const divider = { border: 'none', borderTop: '1px solid #f0f0f0', margin: '10px 0 6px' };
@@ -281,7 +282,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
   }
 
   const showSchema = nodeType === "Read" || nodeType === "Do" || nodeType === "Agent";
-  const showMaxSteps = nodeType !== "Code" && nodeType !== "ForEach";
+  const showMaxSteps = nodeType !== "Code" && nodeType !== "ForEach" && nodeType !== "Bootstrap";
   const showExtraInfo = nodeType === "Do" || nodeType === "Navigate";
 
   return (
@@ -396,6 +397,19 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
         </>
       )}
 
+      {nodeType === "Bootstrap" && (
+        <div style={styles.fieldGroup}>
+          <label style={styles.label}>Packages</label>
+          <textarea
+            style={{ ...styles.textarea, minHeight: 70, fontFamily: 'Consolas, monospace', fontSize: 11 }}
+            value={config.packages || ''}
+            onChange={(e) => updateConfig("packages", e.target.value)}
+            placeholder={"ffmpeg\nimagemagick\nwkhtmltopdf"}
+          />
+          <span style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>One package per line (or comma-separated). Runs apt-get install before the workflow starts.</span>
+        </div>
+      )}
+
       {(showMaxSteps || showExtraInfo) && (
         <>
           <hr style={divider} />
@@ -419,7 +433,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
             </div>
           )}
 
-          {nodeType !== "Code" && nodeType !== "ForEach" && (
+          {nodeType !== "Code" && nodeType !== "ForEach" && nodeType !== "Bootstrap" && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>LLM override</label>
               <datalist id="node-llm-suggestions">
@@ -438,7 +452,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
       )}
 
       {/* LLM override when ADVANCED section not shown (Check node) */}
-      {!showMaxSteps && !showExtraInfo && nodeType !== "Code" && (
+      {!showMaxSteps && !showExtraInfo && nodeType !== "Code" && nodeType !== "Bootstrap" && (
         <>
           <hr style={divider} />
           <div style={sectionLabel}>ADVANCED</div>
@@ -460,7 +474,7 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
       )}
 
       {/* MCP Servers — available for agent-like nodes */}
-      {(nodeType === "Do" || nodeType === "Navigate" || nodeType === "Fill" || nodeType === "Read" || nodeType === "Check" || nodeType === "Agent") && (
+      {(nodeType === "Do" || nodeType === "Navigate" || nodeType === "Fill" || nodeType === "Read" || nodeType === "Check" || nodeType === "Agent") && nodeType !== "Bootstrap" && (
         <McpServersEditor
           servers={config.mcp_servers || []}
           onChange={(servers) => updateConfig("mcp_servers", servers.length > 0 ? servers : undefined)}

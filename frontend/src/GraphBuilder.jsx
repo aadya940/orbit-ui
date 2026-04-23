@@ -88,7 +88,7 @@ export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onCo
         data: {
           nodeType: node.type,
           label: node.label,
-          preview: node.config?.target || node.config?.task || node.config?.condition || node.config?.code || node.config?.class_name || '',
+          preview: node.config?.target || node.config?.task || node.config?.condition || node.config?.code || node.config?.class_name || node.config?.packages || '',
           status: nodeStatuses[node.id] || null,
           output: nodeOutputs[node.id] ?? null,
         },

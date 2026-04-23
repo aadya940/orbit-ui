@@ -71,6 +71,7 @@ class Node:
         "Code",
         "Agent",
         "ForEach",
+        "Bootstrap",
     }
 
 
@@ -509,9 +510,25 @@ def _emit_node(
         lines.append(f'{pad}report_node("{node.id}", "success")')
         return lines
 
-    if node.type != "Check":
+    if node.type not in ("Check", "Bootstrap"):
         lines.append(f'{pad}report_node("{node.id}", "running")')
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
+
+    if node.type == "Bootstrap":
+        lines.append(f'{pad}report_node("{node.id}", "running")')
+        lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
+        raw_packages = node.config.get("packages", "")
+        if isinstance(raw_packages, list):
+            pkg_list = raw_packages
+        else:
+            pkg_list = [p.strip() for p in re.split(r"[,\n]+", str(raw_packages)) if p.strip()]
+        pkg_repr = repr(pkg_list)
+        lines.append(f"{pad}_{node.id}_result = await Bootstrap({pkg_repr}).run()")
+        lines.append(
+            f"{pad}if _{node.id}_result.status == 'failed': raise RuntimeError(_{node.id}_result.summary)"
+        )
+        lines.append(f'{pad}report_node("{node.id}", "success")')
+        return lines
 
     # Open MCP context managers (if any), adjusting effective indent for the verb call
     mcp_open, verb_indent = _mcp_open_lines(node, indent)
@@ -665,7 +682,7 @@ def _emit_node(
         # Check is handled at the control-flow level, not here
         pass
 
-    if node.type not in ("Check", "Code"):
+    if node.type not in ("Check", "Code", "Bootstrap"):
         if node.output_schema:
             lines.append(
                 f'{vpad}report_node_output("{node.id}", _{node.id}_result.output.__dict__ if hasattr(_{node.id}_result.output, "__dict__") else _{node.id}_result.output)'
@@ -1031,10 +1048,11 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
             "from google.adk.tools.mcp_tool.mcp_toolset import SseServerParams as _SseServerParams"
         )
 
-    # ForEach generates a plain Python for-loop — no orbit class to import
-    verb_types = {n.type for n in nodes if n.type not in ("Code", "Agent", "ForEach")}
+    # ForEach/Bootstrap generate plain Python — no orbit verb class to import
+    verb_types = {n.type for n in nodes if n.type not in ("Code", "Agent", "ForEach", "Bootstrap")}
     verb_imports = sorted(verb_types)
     has_agent_nodes = any(n.type == "Agent" for n in nodes)
+    has_bootstrap_nodes = any(n.type == "Bootstrap" for n in nodes)
     if has_agent_nodes:
         # BaseActionAgent must also come from orbit
         orbit_imports = sorted(verb_types | {"BaseActionAgent"})
@@ -1044,6 +1062,8 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
         lines.append(f"from orbit import {', '.join(orbit_imports)}, session")
     else:
         lines.append("from orbit import session")
+    if has_bootstrap_nodes:
+        lines.append("from orbit import Bootstrap")
     lines.append("from state import pause_event, report_node, report_node_output")
     lines.append(f"_inputs = {repr(inputs or {})}")
     lines.append("")

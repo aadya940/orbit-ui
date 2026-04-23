@@ -19,6 +19,7 @@ const TOPICS = [
   { id: 'runs',         label: 'Run History' },
   { id: 'llm',          label: 'Multi-LLM' },
   { id: 'selfhost',     label: 'Self-hosting' },
+  { id: 'bootstrap',    label: 'Bootstrap' },
   { id: 'advanced',     label: 'Advanced' },
 ];
 
@@ -275,6 +276,9 @@ export default function DocsPanel() {
             <NodeCard icon="◈" name="Agent" color="#7c3aed">
               A custom verb — provide a class name and prompt template. Subclasses <C>BaseActionAgent</C>. For when built-in verbs aren't enough.
             </NodeCard>
+            <NodeCard icon="↓" name="Bootstrap" color="#b45309">
+              Install system packages via <C>apt-get</C> before the workflow begins. No LLM involved — pure subprocess. Runs once at graph start.
+            </NodeCard>
           </div>
         </Section>
 
@@ -329,6 +333,7 @@ export default function DocsPanel() {
                 ['Code', 'Code — Python to execute inline'],
                 ['ForEach', 'Items expr — Python expression that evaluates to a list; Loop var — variable name (default: item)'],
                 ['Agent', 'Class name — custom class identifier; Task — runtime description; Prompt template — Jinja2 template with {task}'],
+                ['Bootstrap', 'Packages — one per line (or comma-separated). Installs via apt-get before the graph runs.'],
               ].map(([n, f]) => (
                 <tr key={n}><td style={{ ...s.td, fontWeight: 600, whiteSpace: 'nowrap' }}>{n}</td><td style={s.td}>{f}</td></tr>
               ))}
@@ -702,6 +707,24 @@ docker compose up --build`}</pre>
           <h3 style={s.h3}>.env reference</h3>
           <pre style={s.pre}>{`GEMINI_API_KEY=...    # or whichever LLM key you use
 # VITE_API_URL is set automatically via docker-compose build args`}</pre>
+        </Section>
+
+        {/* ── BOOTSTRAP ── */}
+        <Section id="bootstrap" title="Bootstrap">
+          <p style={s.p}>
+            The <strong>Bootstrap</strong> node installs system packages via <C>apt-get install -y</C> before any other node runs. It doesn't use an LLM — it's a pure subprocess call. Use it when your workflow needs tools not pre-installed in the Docker image (e.g. <C>ffmpeg</C>, <C>imagemagick</C>, <C>wkhtmltopdf</C>).
+          </p>
+          <h3 style={s.h3}>Configuration</h3>
+          <p style={s.p}>Enter one package name per line in the <strong>Packages</strong> field, or use comma-separation:</p>
+          <pre style={s.pre}>{`ffmpeg\nimagemagick\nwkhtmltopdf`}</pre>
+          <h3 style={s.h3}>Behaviour</h3>
+          <ul style={s.ul}>
+            <li style={s.li}>Runs before the session context is created — no browser, no screen.</li>
+            <li style={s.li}>If installation fails the workflow stops immediately with an error.</li>
+            <li style={s.li}>Only works on Linux (the Docker container). On Windows/macOS it returns a failed status immediately.</li>
+            <li style={s.li}>Add it as the very first node in your graph, connected to the first agent node.</li>
+          </ul>
+          <div style={s.tip}>Place Bootstrap at the top of your graph. Downstream nodes can use the installed tools immediately in Code nodes or shell commands.</div>
         </Section>
 
         {/* ── ADVANCED ── */}

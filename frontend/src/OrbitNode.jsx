@@ -8,8 +8,9 @@ const TYPE_META = {
   Fill:     { icon: '≡',  color: '#7c3aed' },
   Read:     { icon: '»',  color: '#0891b2' },
   Code:     { icon: '</>', color: '#6b7280' },
-  Agent:    { icon: '◈',  color: '#7c3aed' },
-  Security: { icon: '🛡️', color: '#dc2626' },
+  Agent:     { icon: '◈',  color: '#7c3aed' },
+  Security:  { icon: '🛡️', color: '#dc2626' },
+  Bootstrap: { icon: '↓',  color: '#b45309' },
 };
 
 const handle = {
