@@ -315,7 +315,16 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   };
 
   const handleGlobalChange = (newGlobal) => {
-    setGraph((current) => ({ ...current, global: newGlobal }));
+    setGraph((current) => {
+      const next = { ...current, global: newGlobal };
+      if (backendAvailable && currentWorkflowId) {
+        clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = setTimeout(() => {
+          saveGraph(currentWorkflowId, next).catch(() => {});
+        }, 1000);
+      }
+      return next;
+    });
   };
 
   const handleNodesChange = (nodes) => {
@@ -458,38 +467,45 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       const msg = err.detail || err.message || 'Failed to start workflow.';
       setStatus(msg);
       showError(msg);
-      return;
     }
-    esRef.current?.close();
-    const es = new EventSource('http://localhost:8000/events');
-    es.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === 'reset') {
-        setNodeStatuses({});
-        setNodeOutputs({});
-      } else if (data.type === 'snapshot') {
-        setNodeStatuses(data.statuses || {});
-        setNodeOutputs(data.outputs || {});
-      } else if (data.type === 'node_output') {
-        setNodeOutputs(prev => ({ ...prev, [data.node_id]: data.output }));
-      } else if (data.node_id === '__workflow__') {
-        const terminal = data.status === 'error' || data.status === 'stopped';
-        if (terminal) {
-          es.close();
-          onWorkflowEnd?.(data.status);
-          fetchRuns(currentWorkflowId);
-          if (data.status === 'error' && data.message) showError(data.message);
-        }
-      } else if (data.node_id) {
-        setNodeStatuses(prev => ({ ...prev, [data.node_id]: data.status }));
-        if (data.status === 'error' && data.message) showError(`Node error: ${data.message}`);
-      }
-    };
-    es.onerror = () => { es.close(); };
-    esRef.current = es;
   }, [onStart, currentWorkflowId]);
 
-  useEffect(() => () => esRef.current?.close(), []);
+  // Always-on SSE connection — receives events from manual, webhook, and cron runs
+  useEffect(() => {
+    const connect = () => {
+      esRef.current?.close();
+      const es = new EventSource('http://localhost:8000/events');
+      es.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'reset') {
+          setNodeStatuses({});
+          setNodeOutputs({});
+        } else if (data.type === 'snapshot') {
+          setNodeStatuses(data.statuses || {});
+          setNodeOutputs(data.outputs || {});
+        } else if (data.type === 'node_output') {
+          setNodeOutputs(prev => ({ ...prev, [data.node_id]: data.output }));
+        } else if (data.node_id === '__workflow__') {
+          const terminal = data.status === 'error' || data.status === 'stopped' || data.status === 'success';
+          if (terminal) {
+            onWorkflowEnd?.(data.status);
+            fetchRuns(currentWorkflowId);
+            if (data.status === 'error' && data.message) showError(data.message);
+          }
+        } else if (data.node_id) {
+          setNodeStatuses(prev => ({ ...prev, [data.node_id]: data.status }));
+          if (data.status === 'error' && data.message) showError(`Node error: ${data.message}`);
+        }
+      };
+      es.onerror = () => {
+        es.close();
+        setTimeout(connect, 2000); // reconnect after 2s
+      };
+      esRef.current = es;
+    };
+    connect();
+    return () => esRef.current?.close();
+  }, [currentWorkflowId]);
 
   useEffect(() => {
     if (!showTemplatePicker) return;

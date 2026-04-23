@@ -460,16 +460,24 @@ async def webhook_trigger(
 # ── Cron scheduler ────────────────────────────────────────────────────────────
 
 async def _scheduler_loop():
-    """Check every 60s for cron triggers that are due and fire them."""
+    """Check every minute (aligned to clock boundaries) for cron triggers."""
     try:
         from croniter import croniter
     except ImportError:
-        return  # croniter not installed — skip scheduling
+        import logging
+        logging.getLogger("orbit").warning(
+            "croniter not installed — cron scheduling disabled. Rebuild the container."
+        )
+        return
 
     while True:
-        await asyncio.sleep(60)
+        # Sleep until the top of the next minute so matches are always exact
+        now = datetime.datetime.now()
+        seconds_until_next_minute = 60 - now.second - now.microsecond / 1_000_000
+        await asyncio.sleep(seconds_until_next_minute)
+
         try:
-            now = datetime.datetime.now()
+            tick = datetime.datetime.now().replace(second=0, microsecond=0)
             with _db() as con:
                 rows = con.execute("SELECT id, graph FROM workflows").fetchall()
             for row in rows:
@@ -484,13 +492,52 @@ async def _scheduler_loop():
                     if not cron_expr:
                         continue
                     try:
-                        if croniter.match(cron_expr, now):
+                        if croniter.match(cron_expr, tick):
                             inputs = t.get("inputs", {})
                             await _run_workflow(row["id"], inputs)
                     except Exception:
                         pass  # malformed cron expression — skip
         except Exception:
             pass  # never crash the scheduler loop
+
+
+@app.get("/debug/cron")
+async def debug_cron():
+    """Diagnose cron scheduling — shows what the scheduler sees right now."""
+    result = {"croniter_installed": False, "now": None, "workflows": []}
+    try:
+        from croniter import croniter
+        result["croniter_installed"] = True
+    except ImportError:
+        return result
+
+    now = datetime.datetime.now().replace(second=0, microsecond=0)
+    result["now"] = now.isoformat()
+
+    with _db() as con:
+        rows = con.execute("SELECT id, name, graph FROM workflows").fetchall()
+
+    for row in rows:
+        graph_data = json.loads(row["graph"])
+        triggers = graph_data.get("global", {}).get("triggers", [])
+        wf_entry = {"id": row["id"], "name": row["name"], "triggers": []}
+        for t in triggers:
+            match = None
+            error = None
+            try:
+                match = croniter.match(t.get("cron", ""), now)
+            except Exception as e:
+                error = str(e)
+            wf_entry["triggers"].append({
+                "type": t.get("type"),
+                "cron": t.get("cron"),
+                "enabled": t.get("enabled"),
+                "would_match_now": match,
+                "error": error,
+            })
+        result["workflows"].append(wf_entry)
+
+    return result
 
 
 @app.get("/runs")

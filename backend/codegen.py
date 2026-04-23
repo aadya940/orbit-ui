@@ -365,7 +365,7 @@ def _resolve_secrets(text: str) -> tuple[str, bool]:
 
 
 _TEMPLATE_RE = re.compile(r"\{\{(\w+)\.(\w+)\}\}")
-_BARE_VAR_RE = re.compile(r"\{\{(\w+)\}\}")
+_BARE_VAR_RE = re.compile(r"\{\{([^{}]+)\}\}")
 
 
 def _resolve_all(text: str, nodes_by_id: dict[str, Node]) -> tuple[str, bool]:
@@ -433,8 +433,8 @@ def _emit_pydantic_models(nodes: list[Node]) -> list[str]:
 
 
 def _esc(s: str) -> str:
-    """Escape backslashes and double-quotes so the string is safe inside '\"...\"'."""
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    """Escape backslashes, double-quotes, and newlines so the string is safe inside '\"...\"'."""
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace('\r', '').replace('\n', '\\n')
 
 
 def _node_llm_expr(node: Node, global_cfg: GlobalConfig) -> str:

@@ -288,9 +288,17 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
     <div style={styles.panel}>
       {/* Header: type badge + Done */}
       <div style={styles.header}>
-        <span style={{ ...styles.badge, background: TYPE_COLORS[nodeType] || "#888" }}>
-          {nodeType}
-        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span style={{ ...styles.badge, background: TYPE_COLORS[nodeType] || "#888", alignSelf: 'flex-start' }}>
+            {nodeType}
+          </span>
+          <span
+            title="Use this ID to reference this node's output: {{node_id.field}}"
+            style={{ fontSize: 9, color: '#bbb', fontFamily: 'monospace', cursor: 'default', userSelect: 'all' }}
+          >
+            {node.id}
+          </span>
+        </div>
         <button style={styles.closeBtn} onClick={onClose}>Done</button>
       </div>
 

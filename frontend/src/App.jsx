@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import VMViewer from './VMViewer';
 import WorkspacePanel from './WorkspacePanel';
 import DocsPanel from './DocsPanel';
@@ -67,6 +67,27 @@ export default function App() {
     setTaskStatus('pending');
     setPaused(false);
   }, []);
+
+  // Sync taskStatus with backend — catches cron/webhook-triggered runs
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/status`);
+        const data = await res.json();
+        if (data.state === 'running') {
+          setTaskStatus('running');
+          setPaused(false);
+        } else if (data.state === 'paused') {
+          setPaused(true);
+        } else if (data.state === 'idle' && taskStatus === 'running') {
+          setTaskStatus('pending');
+          setPaused(false);
+        }
+      } catch {}
+    };
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [taskStatus]);
 
 const handleWorkflowEnd = useCallback((status) => {
       if (status === 'success') {
@@ -350,7 +371,7 @@ const handleWorkflowEnd = useCallback((status) => {
             </div>
 
             <div className="vm-container">
-              <VMViewer onConnect={() => setTaskStatus('running')} viewOnly={!paused} />
+              <VMViewer onConnect={() => setTaskStatus('running')} viewOnly={!paused} isActive={activeTab === 'Desktop'} />
             </div>
           </div>
 
