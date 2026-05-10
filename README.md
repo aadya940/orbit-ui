@@ -40,7 +40,7 @@ Open **http://127.0.0.1:3000**
 ## Nodes
 
 | Node | What it does |
-||-|
+|------|-------------|
 | `Navigate` | Go to a URL |
 | `Do` | Describe an action in plain English |
 | `Read` | Extract data from the current page. Add an output schema to get typed fields. |
