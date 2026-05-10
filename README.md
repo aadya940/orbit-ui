@@ -87,7 +87,7 @@ openrouter/...           ollama/llama3
 ## LLM providers
 
 | Provider | Secret key |
-|-|--|
+|----------|------------|
 | Gemini (default) | `GEMINI_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Anthropic | `ANTHROPIC_API_KEY` |
@@ -108,7 +108,7 @@ git pull && docker compose up --build  # upgrade
 ## Ports
 
 | Port | Service |
-|---|---|
+|------|---------|
 | `3000` | Frontend |
 | `8000` | Backend API (Swagger at `/docs`) |
 | `6080` | noVNC |
