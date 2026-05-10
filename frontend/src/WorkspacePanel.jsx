@@ -71,6 +71,93 @@ const TEMPLATES = [
     },
   },
   {
+    name: 'Competitor Analysis',
+    icon: '⚡',
+    desc: 'Scrape pricing & models from multiple AI platforms, then analyse in ipython',
+    graph: {
+      version: '1',
+      global: { llm: 'gemini-3-flash-preview', human_in_the_loop: false },
+      nodes: [
+        {
+          id: 'n1', type: 'Code', label: 'Setup', position: { x: 180, y: 60 },
+          config: { llm: null, code: "platforms = [\n    {'name': 'OpenAI',    'pricing_url': 'https://openai.com/api/pricing/',                             'models_url': 'https://platform.openai.com/docs/models',                          'api_url': 'https://platform.openai.com/docs/pricing'},\n    {'name': 'Anthropic', 'pricing_url': 'https://platform.claude.com/docs/en/about-claude/pricing',     'models_url': 'https://platform.claude.com/docs/en/docs/about-claude/models/overview', 'api_url': 'https://platform.claude.com/docs/en/about-claude/pricing'},\n    {'name': 'Google',    'pricing_url': 'https://ai.google.dev/gemini-api/docs/pricing',               'models_url': 'https://ai.google.dev/gemini-api/docs/models',                     'api_url': 'https://ai.google.dev/gemini-api/docs/pricing'},\n]\nsummary_rows = []\nmodels_rows = []" },
+        },
+        {
+          id: 'n2', type: 'ForEach', label: 'For each platform', position: { x: 180, y: 200 },
+          config: { items_expr: 'platforms', loop_var: 'platform', llm: null },
+        },
+        {
+          id: 'n3', type: 'Navigate', label: 'Pricing page', position: { x: 180, y: 340 },
+          config: { target: '{{platform.pricing_url}}', max_steps: null, extra_info: 'Dismiss any cookie banners. Wait for pricing tables to load.', llm: null },
+        },
+        {
+          id: 'n4', type: 'Read', label: 'Read pricing', position: { x: 180, y: 480 },
+          config: { task: 'Extract subscription plan names, whether a free tier exists, the entry paid price in USD, and whether enterprise is available.', max_steps: null, llm: null },
+          output_schema: { fields: [
+            { name: 'plan_names', type: 'list[str]' },
+            { name: 'has_free_tier', type: 'bool' },
+            { name: 'entry_paid_price_usd', type: 'str' },
+            { name: 'enterprise_available', type: 'bool' },
+          ]},
+        },
+        {
+          id: 'n5', type: 'Navigate', label: 'Models page', position: { x: 180, y: 620 },
+          config: { target: '{{platform.models_url}}', max_steps: null, extra_info: 'Scroll down to ensure all models are visible before reading.', llm: null },
+        },
+        {
+          id: 'n6', type: 'Read', label: 'Read models', position: { x: 180, y: 760 },
+          config: { task: 'Extract every model — names, context windows, total count, flagship model, and whether any model supports reasoning or extended thinking.', max_steps: null, llm: null },
+          output_schema: { fields: [
+            { name: 'model_names', type: 'list[str]' },
+            { name: 'context_windows', type: 'list[str]' },
+            { name: 'total_model_count', type: 'int' },
+            { name: 'flagship_model', type: 'str' },
+            { name: 'has_reasoning_model', type: 'bool' },
+          ]},
+        },
+        {
+          id: 'n7', type: 'Navigate', label: 'API pricing page', position: { x: 180, y: 900 },
+          config: { target: '{{platform.api_url}}', max_steps: null, extra_info: 'Look for token pricing tables. Scroll through the full page.', llm: null },
+        },
+        {
+          id: 'n8', type: 'Read', label: 'Read API pricing', position: { x: 180, y: 1040 },
+          config: { task: 'Extract API token pricing per model — input and output cost per 1M tokens, cheapest model and price, whether a free API tier exists.', max_steps: null, llm: null },
+          output_schema: { fields: [
+            { name: 'api_models', type: 'list[str]' },
+            { name: 'input_cost_per_1m', type: 'list[str]' },
+            { name: 'cheapest_model_api', type: 'str' },
+            { name: 'cheapest_input_price', type: 'str' },
+            { name: 'has_free_api', type: 'bool' },
+          ]},
+        },
+        {
+          id: 'n9', type: 'Code', label: 'Collect data', position: { x: 180, y: 1180 },
+          config: { llm: null, code: "summary_rows.append({\n    'platform':            platform['name'],\n    'has_free_tier':       n4_out.has_free_tier,\n    'entry_paid_price_usd': n4_out.entry_paid_price_usd,\n    'enterprise_available': n4_out.enterprise_available,\n    'total_model_count':   n6_out.total_model_count,\n    'flagship_model':      n6_out.flagship_model,\n    'has_reasoning_model': n6_out.has_reasoning_model,\n    'cheapest_model_api':  n8_out.cheapest_model_api,\n    'cheapest_input_price': n8_out.cheapest_input_price,\n    'has_free_api':        n8_out.has_free_api,\n})\nfor name, ctx in zip(n6_out.model_names, n6_out.context_windows):\n    models_rows.append({'platform': platform['name'], 'model_name': name, 'context_window': ctx})" },
+        },
+        {
+          id: 'n10', type: 'Code', label: 'Write CSVs', position: { x: 180, y: 1320 },
+          config: { llm: null, code: "import csv, os\nfrom datetime import datetime\nts = datetime.now().strftime('%Y%m%d_%H%M')\nos.makedirs('/workspace/uploads', exist_ok=True)\n\nif summary_rows:\n    with open(f'/workspace/uploads/platform_summary_{ts}.csv', 'w', newline='') as f:\n        w = csv.DictWriter(f, fieldnames=summary_rows[0].keys())\n        w.writeheader(); w.writerows(summary_rows)\n\nif models_rows:\n    with open(f'/workspace/uploads/models_detail_{ts}.csv', 'w', newline='') as f:\n        w = csv.DictWriter(f, fieldnames=models_rows[0].keys())\n        w.writeheader(); w.writerows(models_rows)\n\nprint(f'{len(summary_rows)} platforms, {len(models_rows)} models written')" },
+        },
+        {
+          id: 'n11', type: 'Do', label: 'Analyse in terminal', position: { x: 180, y: 1460 },
+          config: { max_steps: 100, extra_info: '', llm: null, task: "Open an xfce4-terminal. Run: pip install ipython pandas matplotlib seaborn\nThen run: ipython and wait for the In [1]: prompt.\n\nSETUP (do first):\n1. list_active_windows to find the xfce4-terminal pid\n2. manage_window(pid, maximize)\n3. manage_window(pid, focus)\n4. Type: %autoindent off and press Enter\n\nType all code one line at a time using type_text. After each block, call get_page_text(pid) on the terminal to read the output before continuing.\n\nLoad the latest CSVs from /workspace/uploads/ using glob. Print columns and a few rows to understand the data.\n\nThen write and run code to:\n1. Produce a multi-panel matplotlib figure (import matplotlib; matplotlib.use('Agg') first). Save to /workspace/ai_analysis.png and print a confirmation.\n2. Compute key insights from the data. Print a report and save to /workspace/insights.txt.\n\nAdapt everything to what you actually find in the data. Do not assume column names." },
+        },
+      ],
+      edges: [
+        { id: 'e1', source: 'n1',  target: 'n2',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e2', source: 'n2',  target: 'n3',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e3', source: 'n3',  target: 'n4',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e4', source: 'n4',  target: 'n5',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e5', source: 'n5',  target: 'n6',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e6', source: 'n6',  target: 'n7',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e7', source: 'n7',  target: 'n8',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e8', source: 'n8',  target: 'n9',  type: 'sequential',   sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+        { id: 'e9', source: 'n2',  target: 'n10', type: 'foreach_done', sourceHandle: 'handle-foreach-done', targetHandle: 'handle-in' },
+        { id: 'e10', source: 'n10', target: 'n11', type: 'sequential',  sourceHandle: 'handle-out',          targetHandle: 'handle-in' },
+      ],
+    },
+  },
+  {
     name: 'CSV Batch',
     icon: '↺',
     desc: 'Load a CSV and process each row',
