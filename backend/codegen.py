@@ -503,10 +503,16 @@ def _emit_node(
     if node.type == "Code":
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
         lines.append(f'{pad}report_node("{node.id}", "running")')
+        lines.append(f"{pad}try:")
         code = node.config.get("code", "pass")
         dedented = textwrap.dedent(code)
         for line in dedented.splitlines():
-            lines.append(f"{pad}{line}")
+            lines.append(f"{pad}    {line}")
+        lines.append(f"{pad}except Exception as _code_err_{node.id}:")
+        lines.append(f"{pad}    import traceback as _tb_{node.id}")
+        lines.append(f"{pad}    print(f'ERROR in Code node {node.id}: {{_code_err_{node.id}}}')")
+        lines.append(f"{pad}    _tb_{node.id}.print_exc()")
+        lines.append(f"{pad}    raise")
         lines.append(f'{pad}report_node("{node.id}", "success")')
         return lines
 
@@ -568,19 +574,26 @@ def _emit_node(
         target = _esc(target)
         q = "f" if is_fstr else ""
         if node.output_schema:
+            cls_name = node.output_schema.class_name(node.id)
             lines.append(f"{vpad}_{node.id}_result = await Navigate(")
             lines.append(f'{vpad}    {q}"{target}", {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
+            lines.append(
+                f'{vpad}if {node.id}_out is None: raise RuntimeError("Navigate node {node.id} ({node.label}) returned None output — schema validation failed")'
+            )
+            lines.append(f"{vpad}if isinstance({node.id}_out, str):")
+            lines.append(f"{vpad}    import json as _json_{node.id}")
+            lines.append(f"{vpad}    {node.id}_out = {cls_name}(**_json_{node.id}.loads({node.id}_out))")
         else:
             lines.append(f"{vpad}_{node.id}_result = await Navigate(")
             lines.append(f'{vpad}    {q}"{target}", {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
 
     elif node.type == "Do":
@@ -595,15 +608,21 @@ def _emit_node(
             lines.append(f"{vpad}    output_schema={cls_name},")
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
+            lines.append(
+                f'{vpad}if {node.id}_out is None: raise RuntimeError("Do node {node.id} ({node.label}) returned None output — schema validation failed")'
+            )
+            lines.append(f"{vpad}if isinstance({node.id}_out, str):")
+            lines.append(f"{vpad}    import json as _json_{node.id}")
+            lines.append(f"{vpad}    {node.id}_out = {cls_name}(**_json_{node.id}.loads({node.id}_out))")
         else:
             lines.append(f"{vpad}_{node.id}_result = await Do(")
             lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
 
     elif node.type == "Read":
@@ -613,19 +632,30 @@ def _emit_node(
         q = "f" if is_fstr else ""
         if node.output_schema:
             cls_name = node.output_schema.class_name(node.id)
+            # Inject the Pydantic JSON schema into the task prompt at runtime so
+            # models that ignore set_model_response still know the exact shape.
+            lines.append(f"{vpad}_{node.id}_schema_hint = json.dumps({cls_name}.model_json_schema(), indent=2)")
+            lines.append(f"{vpad}_{node.id}_task = {q}\"{task}\" + \"\\n\\nReturn JSON matching EXACTLY this schema (no prose, no extra keys):\\n\" + _{node.id}_schema_hint")
             lines.append(f"{vpad}_{node.id}_result = await Read(")
-            lines.append(f'{vpad}    {q}"{task}", schema={cls_name}, {common},')
+            lines.append(f'{vpad}    _{node.id}_task, schema={cls_name}, {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
+            lines.append(
+                f'{vpad}if {node.id}_out is None: raise RuntimeError("Read node {node.id} ({node.label}) returned None output — schema validation failed")'
+            )
+            # If orbit returned the output as a raw JSON string instead of a Pydantic object, deserialize it
+            lines.append(f"{vpad}if isinstance({node.id}_out, str):")
+            lines.append(f"{vpad}    import json as _json_{node.id}")
+            lines.append(f"{vpad}    {node.id}_out = {cls_name}(**_json_{node.id}.loads({node.id}_out))")
         else:
             lines.append(f"{vpad}_{node.id}_result = await Read(")
             lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
 
     elif node.type == "Fill":
@@ -653,7 +683,7 @@ def _emit_node(
         lines.append(f"{vpad}    {common},")
         lines.append(f"{vpad}).run()")
         lines.append(
-            f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+            f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
         )
 
     elif node.type == "Agent":
@@ -667,7 +697,7 @@ def _emit_node(
             lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
@@ -675,7 +705,7 @@ def _emit_node(
             lines.append(f'{vpad}    {q}"{task}", {common},')
             lines.append(f"{vpad}).run()")
             lines.append(
-                f"{vpad}if _{node.id}_result.status == 'error': raise RuntimeError(_{node.id}_result.summary)"
+                f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
 
     elif node.type == "Check":
@@ -1033,6 +1063,7 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
 
     has_schema = any(n.output_schema for n in nodes)
     if has_schema:
+        lines.append("import json")
         lines.append("from pydantic import BaseModel")
 
     # MCP toolset import (only if any node uses mcp_servers)

@@ -400,8 +400,10 @@ async def _run_workflow(workflow_id: str, inputs: dict | None = None) -> dict:
             _state.report_node("__workflow__", "stopped")
             raise
         except Exception:
+            import traceback as _tb
             final_status = "error"
             _state.report_node("__workflow__", "error")
+            _tb.print_exc()  # goes to tee'd stderr → log file
             raise
         finally:
             rid = _current_run_id
@@ -571,7 +573,7 @@ async def get_run_log(run_id: str):
 @app.post("/interrupt")
 async def interrupt():
     pause_event.clear()
-    return {"status": "paused"}
+    return {"status": "paused", "message": "Pause requested — will pause after current step completes."}
 
 
 @app.post("/resume")
@@ -585,6 +587,15 @@ async def stop():
     global agent_task
     if agent_task and not agent_task.done():
         agent_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(agent_task), timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        # If task is still alive after 5 s, it swallowed CancelledError — force-clear it
+        if not agent_task.done():
+            agent_task.cancel()
+            agent_task = None
+        _state.report_node("__workflow__", "stopped")
         return {"status": "stopped"}
     return {"status": "not_running"}
 

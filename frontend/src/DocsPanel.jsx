@@ -270,7 +270,7 @@ export default function DocsPanel() {
             <NodeCard icon="</>" name="Code" color="#6b7280">
               Run arbitrary Python inline. Has access to all workflow variables. Great for data transforms and file I/O.
             </NodeCard>
-            <NodeCard icon="↺" name="ForEach" color="#0ea5e9">
+            <NodeCard icon="↺" name="ForEach" color="#f59e0b">
               Iterate over a list. Body nodes connect to the bottom handle. Post-loop nodes connect to the <strong>done</strong> handle (bottom-right).
             </NodeCard>
             <NodeCard icon="◈" name="Agent" color="#7c3aed">
@@ -675,7 +675,7 @@ cp .env.example .env
 
 # Start everything
 docker compose up`}</pre>
-          <p style={s.p}>Then open <C>http://localhost:3000</C>.</p>
+          <p style={s.p}>Then open <C>http://127.0.0.1:3000</C>. (On Windows, use <C>127.0.0.1</C> — <C>localhost</C> resolves to IPv6 and won't connect.)</p>
 
           <h3 style={s.h3}>Ports</h3>
           <table style={s.table}>
@@ -751,7 +751,7 @@ docker compose up --build`}</pre>
           </p>
 
           <h3 style={s.h3}>API reference</h3>
-          <p style={s.p}>The backend exposes a REST API at <C>http://localhost:8000</C>. Explore it interactively at <C>/docs</C> (Swagger UI).</p>
+          <p style={s.p}>The backend exposes a REST API at <C>http://127.0.0.1:8000</C>. Explore it interactively at <C>/docs</C> (Swagger UI).</p>
           <pre style={s.pre}>{`GET    /workflows                  list all workflows
 POST   /workflows                  create workflow
 DELETE /workflows/{id}             delete workflow

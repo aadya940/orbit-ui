@@ -27,7 +27,7 @@ export default function VMViewer({ onConnect, viewOnly = true, isActive = true }
     }
 
     setStatus('Connecting...');
-    const rfb = new RFBRef.current(containerRef.current, 'ws://localhost:6080', {
+    const rfb = new RFBRef.current(containerRef.current, 'ws://127.0.0.1:6080', {
       credentials: { password: '' },
     });
     rfb.viewOnly = viewOnly;

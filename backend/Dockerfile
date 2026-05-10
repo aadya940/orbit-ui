@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     libxrandr-dev \
     libxi-dev \
     dbus-x11 \
+    xclip \
     x11vnc \
     xterm \
     xfce4 \
@@ -30,17 +31,19 @@ RUN apt-get update && apt-get install -y \
     xfce4-taskmanager \
     thunar \
     mousepad \
+    libreoffice \
     gnome-calculator \
     adwaita-icon-theme \
     gnome-icon-theme \
     gtk2-engines-murrine \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-venv \
-    python3.11-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-venv \
+    python3-dev \
     python3-pip \
-    python3.11-tk \
+    python3-tk \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install Google Chrome (bypasses Snap limitation)
@@ -60,11 +63,11 @@ RUN mv /usr/bin/google-chrome-stable /usr/bin/google-chrome-stable.real && \
     ln -sf /usr/bin/google-chrome-stable /usr/bin/google-chrome
 
 ENV VIRTUAL_ENV=/opt/venv
-RUN python3.11 -m venv $VIRTUAL_ENV
+RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN pip install --upgrade pip setuptools wheel websockify
-RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.37 python-dotenv pillow ddgs pandas fastapi uvicorn patchright croniter
+RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.43 python-dotenv pillow ddgs pandas fastapi uvicorn patchright croniter
 RUN apt-get update -o Acquire::Retries=3 && apt-get install -y fonts-ipafont-gothic fonts-freefont-ttf fonts-noto-color-emoji fonts-tlwg-loma-otf fonts-unifont fonts-wqy-zenhei xfonts-cyrillic || true && patchright install chromium --with-deps
 
 # Pre-seed XFCE config running as root to avoid D-Bus permission issues

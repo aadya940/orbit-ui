@@ -4,12 +4,14 @@ import WorkspacePanel from './WorkspacePanel';
 import DocsPanel from './DocsPanel';
 
 const NAV_TABS = ['Home', 'Tasks', 'Desktop', 'Docs'];
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('Desktop');
   const [taskStatus, setTaskStatus] = useState('pending'); // 'pending' | 'running'
   const [paused, setPaused] = useState(false); // true = user in control
+  const [pausePending, setPausePending] = useState(false); // pause requested, waiting for step to finish
+  const [stopping, setStopping] = useState(false); // stop requested, waiting for task to die
   const [rightWidth, setRightWidth] = useState(460);
   const isDragging = useRef(false);
   const startX = useRef(0);
@@ -56,16 +58,21 @@ export default function App() {
     if (paused) {
       await fetch(`${API}/resume`, { method: 'POST' });
       setPaused(false);
+      setPausePending(false);
     } else {
       await fetch(`${API}/interrupt`, { method: 'POST' });
-      setPaused(true);
+      setPausePending(true); // show "Pausing..." until /status confirms paused
     }
   }, [paused]);
 
   const handleStop = useCallback(async () => {
+    setStopping(true);
     await fetch(`${API}/stop`, { method: 'POST' });
+    // Backend now waits up to 5s — clear state after it responds
     setTaskStatus('pending');
     setPaused(false);
+    setPausePending(false);
+    setStopping(false);
   }, []);
 
   // Sync taskStatus with backend — catches cron/webhook-triggered runs
@@ -79,9 +86,12 @@ export default function App() {
           setPaused(false);
         } else if (data.state === 'paused') {
           setPaused(true);
+          setPausePending(false);
         } else if (data.state === 'idle' && taskStatus === 'running') {
           setTaskStatus('pending');
           setPaused(false);
+          setPausePending(false);
+          setStopping(false);
         }
       } catch {}
     };
@@ -325,19 +335,19 @@ const handleWorkflowEnd = useCallback((status) => {
                 <div className="status-row">
                   <span className={`status-dot ${paused ? 'paused' : taskStatus}`} />
                   <span className="status-label">
-                      {paused ? "You're in control" : taskStatus === 'running' ? 'Agent running' : taskStatus === 'finished' ? 'Agent finished' : 'Idle'}
+                      {stopping ? 'Stopping…' : pausePending ? 'Pausing…' : paused ? "You're in control" : taskStatus === 'running' ? 'Agent running' : taskStatus === 'finished' ? 'Agent finished' : 'Idle'}
                     </span>
                   </div>
                   <span className="task-sublabel">
-                    {paused ? (taskStatus === 'finished' ? 'Workflow complete' : 'Agent paused') : taskStatus === 'pending' ? 'No workflow started' : 'Autonomous mode'}
+                    {stopping ? 'Waiting for current step to cancel' : pausePending ? 'Will pause after current step completes' : paused ? (taskStatus === 'finished' ? 'Workflow complete' : 'Agent paused') : taskStatus === 'pending' ? 'No workflow started' : 'Autonomous mode'}
                   </span>
                 </div>
               <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     className={`take-over-btn ${paused ? 'user-control' : 'agent-running'}`}
                     onClick={handleTakeOver}
-                      disabled={taskStatus === 'finished'}
-                      style={taskStatus === 'finished' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                    disabled={taskStatus === 'finished' || pausePending || stopping}
+                    style={(taskStatus === 'finished' || pausePending || stopping) ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
                     <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
                       {paused
@@ -345,26 +355,28 @@ const handleWorkflowEnd = useCallback((status) => {
                         : <><rect x="2" y="2" width="3" height="8" rx="0.5"/><rect x="7" y="2" width="3" height="8" rx="0.5"/></>
                       }
                     </svg>
-                    {paused ? 'Hand Back' : 'Take Over'}
+                    {pausePending ? 'Pausing…' : paused ? 'Hand Back' : 'Take Over'}
                   </button>
                   {(taskStatus === 'running' || taskStatus === 'finished') && (
                     <button
                       onClick={handleStop}
+                      disabled={stopping}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 5,
                         padding: '5px 10px', borderRadius: 6,
                         border: '1.5px solid #fca5a5',
                         background: '#fff5f5', color: '#dc2626',
                         fontFamily: 'Geist, sans-serif', fontSize: 12, fontWeight: 500,
-                        cursor: 'pointer',
+                        cursor: stopping ? 'not-allowed' : 'pointer',
+                        opacity: stopping ? 0.6 : 1,
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; }}
+                      onMouseEnter={e => { if (!stopping) e.currentTarget.style.background = '#fee2e2'; }}
                       onMouseLeave={e => { e.currentTarget.style.background = '#fff5f5'; }}
                     >
                       <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
                         <rect x="1" y="1" width="8" height="8" rx="1.5"/>
                       </svg>
-                      Stop
+                      {stopping ? 'Stopping…' : 'Stop'}
                     </button>
                   )}
                 </div>

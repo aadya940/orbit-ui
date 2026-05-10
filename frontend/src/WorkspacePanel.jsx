@@ -475,7 +475,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   useEffect(() => {
     const connect = () => {
       esRef.current?.close();
-      const es = new EventSource('http://localhost:8000/events');
+      const es = new EventSource(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'}/events`);
       es.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if (data.type === 'reset') {
