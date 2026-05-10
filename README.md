@@ -4,7 +4,6 @@ A self-hosted tool for building computer use workflows. You draw a graph of step
 
 Works best with the browser. Chrome login sessions persist across restarts via a named Docker volume, so the agent stays logged into sites between runs.
 
----
 
 ## What you can do with it
 
@@ -14,15 +13,12 @@ Works best with the browser. Chrome login sessions persist across restarts via a
 - Process a CSV row by row, one browser action per row
 - Chain scraping, analysis, and file output into a single workflow
 
----
-
 ## How it works
 
 Workflows are graphs. Each node is a step: navigate to a URL, do something, read data, check a condition, run Python. The agent runs each step in order inside a Docker VM with a full browser. You can watch it over VNC, pause and take manual control, then hand back.
 
 Runs can be triggered from the UI, via webhook, or on a cron schedule.
 
----
 
 ## Quick start
 
@@ -40,12 +36,11 @@ Open **http://127.0.0.1:3000**
 
 > **Windows:** use `127.0.0.1` not `localhost` — on Windows, `localhost` resolves to IPv6 and the connection will fail.
 
----
 
 ## Nodes
 
 | Node | What it does |
-|------|-------------|
+||-|
 | `Navigate` | Go to a URL |
 | `Do` | Describe an action in plain English |
 | `Read` | Extract data from the current page. Add an output schema to get typed fields. |
@@ -56,7 +51,6 @@ Open **http://127.0.0.1:3000**
 | `Agent` | Custom node type. Bring your own class and prompt. |
 | `Bootstrap` | Run `apt-get install` before the workflow starts. No LLM involved. |
 
----
 
 ## Features
 
@@ -89,19 +83,17 @@ openrouter/...           ollama/llama3
 
 **Run logs** — every run is logged to `/workspace/logs/`. Stream output live in the UI or browse past runs.
 
----
 
 ## LLM providers
 
 | Provider | Secret key |
-|----------|-----------|
+|-|--|
 | Gemini (default) | `GEMINI_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
 | Anthropic | `ANTHROPIC_API_KEY` |
 | OpenRouter | `OPENROUTER_API_KEY` |
 | Ollama | no key needed |
 
----
 
 ## Data
 
@@ -112,17 +104,16 @@ cp -r ./workspace ./workspace-backup   # backup
 git pull && docker compose up --build  # upgrade
 ```
 
----
 
 ## Ports
 
 | Port | Service |
-|------|---------|
+|||
 | `3000` | Frontend |
 | `8000` | Backend API (Swagger at `/docs`) |
 | `6080` | noVNC |
 | `7878` | OculOS daemon |
 
----
+
 
 Built on [orbit-cua](https://pypi.org/project/orbit-cua/)
