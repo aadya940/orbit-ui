@@ -1,4 +1,5 @@
 <img width="1213" height="441" alt="image" src="https://github.com/user-attachments/assets/e4bec6a9-3d1d-4878-b079-8a52f05a2489" />
+
 # Orbit: Open Source AI Desktop Agent
 
 A self-hosted tool for building computer use workflows on a real desktop inside Docker.
