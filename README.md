@@ -1,6 +1,8 @@
 # Orbit Studio
 
-A self-hosted tool for building browser automation workflows. You draw a graph of steps, describe what you want each step to do, and an AI agent executes them in a real Chrome browser inside Docker.
+A self-hosted tool for building computer use workflows. You draw a graph of steps, describe what you want each step to do, and an AI agent executes them on a real desktop inside Docker — browser, terminal, or any GUI app.
+
+Works best with the browser. Chrome login sessions persist across restarts via a named Docker volume, so the agent stays logged into sites between runs.
 
 ---
 
