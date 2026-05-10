@@ -17,6 +17,18 @@ A self-hosted tool for building computer use workflows on a real desktop inside 
 
 Runs in a Docker container with a full browser and desktop. You can watch it work over VNC, pause and take control, then hand back.
 
+## Example workflows
+
+Built-in templates you can load in one click:
+
+| Template | What it does |
+|----------|-------------|
+| **Web Scrape** | Navigate to a page, extract structured fields |
+| **Login & Fill** | Log in with saved credentials, fill and submit a form |
+| **Retry Loop** | Run an action, check if it succeeded, retry if not |
+| **Competitor Analysis** | Scrape pricing, models, and API costs across a list of competitors, analyse in terminal, output CSV + charts |
+| **CSV Batch** | Load a CSV, loop over every row, perform an action per row |
+
 ## Quick start
 
 ```bash
