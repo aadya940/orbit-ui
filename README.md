@@ -108,7 +108,7 @@ git pull && docker compose up --build  # upgrade
 ## Ports
 
 | Port | Service |
-|||
+|---|---|
 | `3000` | Frontend |
 | `8000` | Backend API (Swagger at `/docs`) |
 | `6080` | noVNC |
