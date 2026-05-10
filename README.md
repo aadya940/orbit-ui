@@ -35,7 +35,9 @@ cp .env.example .env
 docker compose up
 ```
 
-Open **http://localhost:3000**
+Open **http://127.0.0.1:3000**
+
+> **Windows users:** use `127.0.0.1` instead of `localhost` — on Windows, `localhost` resolves to IPv6 and won't connect.
 
 ---
 
@@ -51,6 +53,7 @@ Open **http://localhost:3000**
 | `ForEach` | Iterate over a list |
 | `Code` | Run Python inline |
 | `Agent` | Custom verb with your own prompt template |
+| `Bootstrap` | Install system packages via `apt-get` before the workflow begins |
 
 ---
 
@@ -60,7 +63,7 @@ Open **http://localhost:3000**
 
 **Webhook triggers** — every workflow gets a stable endpoint:
 ```bash
-curl -X POST http://localhost:8000/webhook/{workflow_id} \
+curl -X POST http://127.0.0.1:8000/webhook/{workflow_id} \
   -H "Content-Type: application/json" \
   -d '{"job_url": "https://example.com/jobs/123"}'
 ```
