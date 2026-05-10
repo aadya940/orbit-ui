@@ -1,4 +1,4 @@
-# Orbit Studio
+# Orbit: Open Source AI Desktop Agent
 
 A self-hosted tool for building computer use workflows on a real desktop inside Docker.
 
