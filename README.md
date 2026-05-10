@@ -1,26 +1,24 @@
 # Orbit Studio
 
-**Visual workflow builder for browser AI agents.**
-
-Draw a graph, describe what you want in plain English, and watch a real browser do it — scraping, form-filling, clicking, extracting. Schedule it. Webhook it. Walk away.
+A self-hosted tool for building browser automation workflows. You draw a graph of steps, describe what you want each step to do, and an AI agent executes them in a real Chrome browser inside Docker.
 
 ---
 
-## What people build with it
+## What you can do with it
 
-- **Competitive research** — scrape pricing, models, and features across multiple sites; pipe results into a live analysis
-- **Job applications** — navigate LinkedIn, filter listings, fill and submit applications on autopilot
-- **Data extraction** — pull structured data from any page into JSON or CSV, no brittle selectors required
-- **Monitoring** — check pages on a schedule, branch on conditions, retry until something changes
-- **Batch automation** — feed a CSV in, get results out, one row at a time
+- Scrape structured data from websites into JSON or CSV
+- Fill and submit forms using credentials from a secrets vault
+- Monitor pages on a schedule and branch based on what's on screen
+- Process a CSV row by row, one browser action per row
+- Chain scraping, analysis, and file output into a single workflow
 
 ---
 
 ## How it works
 
-You build a workflow as a graph of nodes. The agent runs each step inside a sandboxed Docker VM with a full Chrome browser. Watch it work live over VNC, take manual control at any point, then hand back.
+Workflows are graphs. Each node is a step: navigate to a URL, do something, read data, check a condition, run Python. The agent runs each step in order inside a Docker VM with a full browser. You can watch it over VNC, pause and take manual control, then hand back.
 
-Trigger runs manually from the UI, via webhook, or on a cron schedule.
+Runs can be triggered from the UI, via webhook, or on a cron schedule.
 
 ---
 
@@ -31,14 +29,14 @@ git clone https://github.com/aadya940/orbit-ui
 cd orbit-ui
 
 cp .env.example .env
-# Set GEMINI_API_KEY — or any supported LLM key
+# Set GEMINI_API_KEY (or any supported LLM key)
 
 docker compose up
 ```
 
 Open **http://127.0.0.1:3000**
 
-> **Windows users:** use `127.0.0.1` — `localhost` resolves to IPv6 on Windows and won't connect.
+> **Windows:** use `127.0.0.1` not `localhost` — on Windows, `localhost` resolves to IPv6 and the connection will fail.
 
 ---
 
@@ -46,48 +44,48 @@ Open **http://127.0.0.1:3000**
 
 | Node | What it does |
 |------|-------------|
-| `Navigate` | Open a URL — supports template variables like `{{inputs.url}}` |
-| `Do` | Describe any action in plain English. Clicks, scrolls, typing — the agent figures it out. |
-| `Read` | Extract structured data from the current page. Define an output schema to get typed fields. |
-| `Fill` | Fill a form with a field → value map. Use `{{secrets.PASSWORD}}` for credentials. |
-| `Check` | Ask a yes/no question about the screen. Routes to a true or false path. |
-| `ForEach` | Iterate over a list. Connect body nodes to the loop handle, post-loop nodes to done. |
-| `Code` | Run arbitrary Python inline. Full access to all workflow variables and outputs. |
-| `Agent` | Custom verb — bring your own class and prompt template. |
-| `Bootstrap` | Install system packages via `apt-get` before the graph runs. No LLM involved. |
+| `Navigate` | Go to a URL |
+| `Do` | Describe an action in plain English |
+| `Read` | Extract data from the current page. Add an output schema to get typed fields. |
+| `Fill` | Fill a form. Map field names to values, use `{{secrets.KEY}}` for credentials. |
+| `Check` | Yes/no question about the screen. Routes to a true or false branch. |
+| `ForEach` | Loop over a list |
+| `Code` | Run Python inline. Has access to all previous node outputs. |
+| `Agent` | Custom node type. Bring your own class and prompt. |
+| `Bootstrap` | Run `apt-get install` before the workflow starts. No LLM involved. |
 
 ---
 
 ## Features
 
-**Structured extraction** — add an Output Schema to any Read or Do node to get back typed, validated fields instead of raw text. Reference them downstream as `{{node_id.field}}`.
+**Output schemas** — tell a Read or Do node what fields to return and what types they should be. Downstream nodes can reference them as `{{node_id.field}}`.
 
-**Workflow inputs** — declare named parameters (`job_url`, `email`, etc.) and reference them as `{{inputs.name}}` anywhere. Provide values at run time via the UI, webhook payload, or cron config.
+**Workflow inputs** — declare parameters and pass them in at run time via the UI, webhook body, or cron config. Reference as `{{inputs.name}}`.
 
-**Webhook triggers** — every workflow gets a stable POST endpoint:
+**Webhooks** — every workflow has a POST endpoint:
 ```bash
 curl -X POST http://127.0.0.1:8000/webhook/{workflow_id} \
   -H "Content-Type: application/json" \
   -d '{"job_url": "https://example.com/jobs/123"}'
 ```
 
-**Cron scheduling** — set expressions like `0 9 * * 1-5` in the Triggers panel. The scheduler fires automatically, skips if a run is already in progress.
+**Cron scheduling** — standard cron expressions in the Triggers panel. If a run is already in progress when a trigger fires, that firing is skipped.
 
-**Multi-LLM** — any model via LiteLLM, set globally or overridden per node:
+**Multi-LLM** — any model via LiteLLM, set globally or per node:
 ```
 gemini-3-flash-preview   openai/gpt-4o   anthropic/claude-opus-4-7
 openrouter/...           ollama/llama3
 ```
 
-**Secrets vault** — store API keys and passwords, reference as `{{secrets.KEY}}`. Values are never returned by the API after saving.
+**Secrets** — stored in the local SQLite database, referenced as `{{secrets.KEY}}`, never returned by the API after saving.
 
-**MCP servers** — attach any MCP-compatible tool server to a node (stdio or SSE). Give the agent filesystem access, database queries, or custom APIs mid-workflow.
+**MCP servers** — attach a tool server (stdio or SSE) to any node to give the agent extra capabilities like filesystem access or custom APIs.
 
-**Human-in-the-loop** — enable per-step confirmation to review every action before it fires. Toggle off for fully autonomous runs.
+**Human-in-the-loop** — enable per-step confirmation to review each action before it fires.
 
-**Take Over / Hand Back** — click Take Over at any point to pause the agent and drive the browser yourself. Click Hand Back to return control. The agent resumes from where it left off.
+**Take Over / Hand Back** — pause the agent at any point, control the browser yourself, resume when ready.
 
-**Run history** — every run is logged. Stream output live, or browse past runs and replay their outputs.
+**Run logs** — every run is logged to `/workspace/logs/`. Stream output live in the UI or browse past runs.
 
 ---
 
@@ -101,20 +99,15 @@ openrouter/...           ollama/llama3
 | OpenRouter | `OPENROUTER_API_KEY` |
 | Ollama | no key needed |
 
-Add keys in the Secrets panel (lock icon in the top bar) or directly in `.env`.
-
 ---
 
-## Persistence & upgrades
+## Data
 
-Everything lives in `./workspace` — a bind-mounted directory that survives restarts and rebuilds.
+Everything is in `./workspace` — a bind mount that survives restarts and rebuilds.
 
 ```bash
-# Backup
-cp -r ./workspace ./workspace-backup
-
-# Upgrade (data preserved)
-git pull && docker compose up --build
+cp -r ./workspace ./workspace-backup   # backup
+git pull && docker compose up --build  # upgrade
 ```
 
 ---
@@ -123,11 +116,11 @@ git pull && docker compose up --build
 
 | Port | Service |
 |------|---------|
-| `3000` | Frontend UI |
-| `8000` | Backend API + Swagger at `/docs` |
-| `6080` | noVNC — live browser view |
+| `3000` | Frontend |
+| `8000` | Backend API (Swagger at `/docs`) |
+| `6080` | noVNC |
 | `7878` | OculOS daemon |
 
 ---
 
-Built on [orbit-cua](https://pypi.org/project/orbit-cua/) · [PyPI](https://pypi.org/project/orbit-cua/)
+Built on [orbit-cua](https://pypi.org/project/orbit-cua/)
