@@ -13,6 +13,7 @@ A self-hosted tool for building computer use workflows on a real desktop inside 
 - Run Python inline with access to all previous step outputs
 - Monitor pages on a schedule and branch based on what's on screen
 - Chain any of the above into a single workflow
+- Apply to Jobs
 
 Runs in a Docker container with a full browser and desktop. You can watch it work over VNC, pause and take control, then hand back.
 
