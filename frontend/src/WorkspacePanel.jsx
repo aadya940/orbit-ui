@@ -5,6 +5,7 @@ import WorkflowSelector from './WorkflowSelector';
 import WorkspaceToolbar from './WorkspaceToolbar';
 import GraphBuilder from './GraphBuilder';
 import NodeConfigPanel from './NodeConfigPanel';
+import NodeLogModal from './NodeLogModal';
 
 const DEFAULT_GRAPH = {
   version: '1',
@@ -235,6 +236,8 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
   const [backendAvailable, setBackendAvailable] = useState(true);
   const [nodeStatuses, setNodeStatuses] = useState({});
   const [nodeOutputs, setNodeOutputs] = useState({});
+  const [nodeLogs, setNodeLogs] = useState({});
+  const [nodeLogModal, setNodeLogModal] = useState(null); // nodeId | null
   const [bottomTab, setBottomTab] = useState('preview');
   const [runs, setRuns] = useState([]);
   const [logModal, setLogModal] = useState(null); // {runId, content}
@@ -319,6 +322,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       setSelectedNodeId(null);
       setStatus('Workflow loaded.');
       setNodeStatuses({});
+      setNodeLogs({});
       fetchRuns(data.id);
     } catch {
       setStatus('Failed to load workflow.');
@@ -340,6 +344,7 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
       setStatus('New workflow created.');
       setNodeStatuses({});
       setNodeOutputs({});
+      setNodeLogs({});
     } catch {
       setStatus('Failed to create workflow.');
     }
@@ -568,11 +573,19 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
         if (data.type === 'reset') {
           setNodeStatuses({});
           setNodeOutputs({});
+          setNodeLogs({});
         } else if (data.type === 'snapshot') {
           setNodeStatuses(data.statuses || {});
           setNodeOutputs(data.outputs || {});
+          setNodeLogs(data.logs || {});
         } else if (data.type === 'node_output') {
           setNodeOutputs(prev => ({ ...prev, [data.node_id]: data.output }));
+        } else if (data.type === 'node_log') {
+          setNodeLogs(prev => {
+            const existing = prev[data.node_id] || [];
+            const next = [...existing, data.entry].slice(-100);
+            return { ...prev, [data.node_id]: next };
+          });
         } else if (data.node_id === '__workflow__') {
           const terminal = data.status === 'error' || data.status === 'stopped' || data.status === 'success';
           if (terminal) {
@@ -738,6 +751,15 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
           </div>
         </div>
       )}
+      {nodeLogModal && (
+        <NodeLogModal
+          nodeId={nodeLogModal}
+          node={graph.nodes.find(n => n.id === nodeLogModal) || null}
+          logs={nodeLogs[nodeLogModal] || []}
+          isRunning={nodeStatuses[nodeLogModal] === 'running'}
+          onClose={() => setNodeLogModal(null)}
+        />
+      )}
       <WorkflowSelector
         workflows={workflows}
         currentId={currentWorkflowId}
@@ -782,6 +804,8 @@ export default function WorkspacePanel({ onStart, onWorkflowEnd }) {
                 selectedNodeId={selectedNodeId}
                 nodeStatuses={nodeStatuses}
                 nodeOutputs={nodeOutputs}
+                nodeLogs={nodeLogs}
+                onOpenLog={setNodeLogModal}
               />
             </div>
             <div style={{ flex: `0 0 ${bottomTab === 'files' ? 320 : 160}px`, margin: '0 8px 8px', background: '#0d1117', borderRadius: 10, border: '1px solid #30363d', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>

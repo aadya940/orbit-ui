@@ -503,6 +503,7 @@ def _emit_node(
     if node.type == "Code":
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
         lines.append(f'{pad}report_node("{node.id}", "running")')
+        lines.append(f'{pad}_current_log_node[0] = {node.id!r}')
         lines.append(f"{pad}try:")
         code = node.config.get("code", "pass")
         dedented = textwrap.dedent(code)
@@ -513,16 +514,19 @@ def _emit_node(
         lines.append(f"{pad}    print(f'ERROR in Code node {node.id}: {{_code_err_{node.id}}}')")
         lines.append(f"{pad}    _tb_{node.id}.print_exc()")
         lines.append(f"{pad}    raise")
+        lines.append(f'{pad}_current_log_node[0] = None')
         lines.append(f'{pad}report_node("{node.id}", "success")')
         return lines
 
     if node.type not in ("Check", "Bootstrap"):
         lines.append(f'{pad}report_node("{node.id}", "running")')
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
+        lines.append(f'{pad}_current_log_node[0] = {node.id!r}')
 
     if node.type == "Bootstrap":
         lines.append(f'{pad}report_node("{node.id}", "running")')
         lines.append(f'{pad}print("--- {node.id}: {node.label} ---")')
+        lines.append(f'{pad}_current_log_node[0] = {node.id!r}')
         raw_packages = node.config.get("packages", "")
         if isinstance(raw_packages, list):
             pkg_list = raw_packages
@@ -533,6 +537,9 @@ def _emit_node(
         lines.append(
             f"{pad}if _{node.id}_result.status == 'failed': raise RuntimeError(_{node.id}_result.summary)"
         )
+        lines.append(f"{pad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+        lines.append(f"{pad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
+        lines.append(f'{pad}_current_log_node[0] = None')
         lines.append(f'{pad}report_node("{node.id}", "success")')
         return lines
 
@@ -581,6 +588,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
             lines.append(
                 f'{vpad}if {node.id}_out is None: raise RuntimeError("Navigate node {node.id} ({node.label}) returned None output — schema validation failed")'
@@ -595,6 +604,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
 
     elif node.type == "Do":
         task = node.config.get("task", "").strip()
@@ -610,6 +621,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
             lines.append(
                 f'{vpad}if {node.id}_out is None: raise RuntimeError("Do node {node.id} ({node.label}) returned None output — schema validation failed")'
@@ -624,6 +637,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
 
     elif node.type == "Read":
         task = node.config.get("task", "").strip()
@@ -642,6 +657,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
             lines.append(
                 f'{vpad}if {node.id}_out is None: raise RuntimeError("Read node {node.id} ({node.label}) returned None output — schema validation failed")'
@@ -657,6 +674,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
 
     elif node.type == "Fill":
         target = node.config.get("target", "").strip()
@@ -685,6 +704,8 @@ def _emit_node(
         lines.append(
             f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
         )
+        lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+        lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
 
     elif node.type == "Agent":
         class_name = node.config.get("class_name", "CustomVerb").strip()
@@ -699,6 +720,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
             lines.append(f"{vpad}{node.id}_out = _{node.id}_result.output")
         else:
             lines.append(f"{vpad}_{node.id}_result = await {class_name}(")
@@ -707,6 +730,8 @@ def _emit_node(
             lines.append(
                 f"{vpad}if _{node.id}_result.status in ('error', 'failed'): raise RuntimeError(_{node.id}_result.summary)"
             )
+            lines.append(f"{vpad}if hasattr(_{node.id}_result, 'summary') and _{node.id}_result.summary:")
+            lines.append(f"{vpad}    report_node_log({node.id!r}, str(_{node.id}_result.summary))")
 
     elif node.type == "Check":
         # Check is handled at the control-flow level, not here
@@ -717,6 +742,7 @@ def _emit_node(
             lines.append(
                 f'{vpad}report_node_output("{node.id}", _{node.id}_result.output.__dict__ if hasattr(_{node.id}_result.output, "__dict__") else _{node.id}_result.output)'
             )
+        lines.append(f'{vpad}_current_log_node[0] = None')
         lines.append(f'{vpad}report_node("{node.id}", "success")')
 
     return lines
@@ -796,6 +822,29 @@ def _emit_loop_group(
                 ctx["prev_output_var"][0] = f"{lg.tail}_out"
         emitted.add(lg.tail)
         check_node, check_nid = header_node, lg.header
+        check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
+        lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
+        lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
+        lines.append(f"{inner_pad}if {check_expr}:")
+        lines.append(f'{break_pad}report_node("{check_nid}", "success")')
+        cond = ctx["conditionals"].get(check_nid, {})
+        true_target = cond.get("true")
+        loop_inner = ctx["loop_inner_members"]
+        lines.append(f"{break_pad}break")
+        if true_target and true_target not in loop_inner:
+            after_loop_nid: str | None = true_target
+        else:
+            seq_after = [
+                e.target
+                for e in ctx["out_edges"].get(check_nid, [])
+                if e.type == "sequential" and e.target not in loop_inner
+            ]
+            after_loop_nid = seq_after[0] if seq_after else None
+        lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
+        lines.append(f"{break_pad}await asyncio.sleep(3)")
+        lines.append(f"{loop_pad}else:")
+        lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+        lines.append(f"{loop_pad}    return")
     else:
         # Pattern B: non-Check header (e.g. Navigate → Check)
         lines.extend(
@@ -827,45 +876,58 @@ def _emit_loop_group(
                 ctx["prev_output_var"][0] = f"{body_nid}_out"
             emitted.add(body_nid)
 
-        if tail_node.type != "Check":
-            raise CodegenError(
-                f"Loop from non-Check header {lg.header!r}: tail node {lg.tail!r} "
-                f"must be a Check node, got {tail_node.type!r}"
+        if tail_node.type == "Check":
+            # Tail is a Check — use it as the exit condition
+            emitted.add(lg.tail)
+            check_node, check_nid = tail_node, lg.tail
+            check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
+            lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
+            lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
+            lines.append(f"{inner_pad}if {check_expr}:")
+            lines.append(f'{break_pad}report_node("{check_nid}", "success")')
+            cond = ctx["conditionals"].get(check_nid, {})
+            true_target = cond.get("true")
+            loop_inner = ctx["loop_inner_members"]
+            lines.append(f"{break_pad}break")
+            if true_target and true_target not in loop_inner:
+                after_loop_nid: str | None = true_target
+            else:
+                seq_after = [
+                    e.target
+                    for e in ctx["out_edges"].get(check_nid, [])
+                    if e.type == "sequential" and e.target not in loop_inner
+                ]
+                after_loop_nid = seq_after[0] if seq_after else None
+            lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
+            lines.append(f"{break_pad}await asyncio.sleep(3)")
+            lines.append(f"{loop_pad}else:")
+            lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+            lines.append(f"{loop_pad}    return")
+        else:
+            # No Check at tail — unconditional retry loop, runs up to max_iterations times
+            lines.extend(
+                _emit_node(
+                    tail_node,
+                    global_cfg,
+                    nodes_by_id,
+                    inner_indent,
+                    log_file_path,
+                    ctx["prev_output_var"][0],
+                )
             )
-        emitted.add(lg.tail)
-        check_node, check_nid = tail_node, lg.tail
-
-    check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
-    lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
-    lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
-    lines.append(f"{inner_pad}if {check_expr}:")
-    lines.append(f'{break_pad}report_node("{check_nid}", "success")')
-
-    # Determine what follows the loop (conditional_true target outside loop)
-    cond = ctx["conditionals"].get(check_nid, {})
-    true_target = cond.get("true")
-    loop_inner = ctx["loop_inner_members"]
-    # Always break when Check passes — that's how the loop exits on success.
-    # true_target (if any, outside the loop) is what runs after the break.
-    lines.append(f"{break_pad}break")
-    if true_target and true_target not in loop_inner:
-        after_loop_nid: str | None = true_target
-    else:
-        # Fall through to sequential successors of tail outside the loop
-        seq_after = [
-            e.target
-            for e in ctx["out_edges"].get(check_nid, [])
-            if e.type == "sequential" and e.target not in loop_inner
-        ]
-        after_loop_nid = seq_after[0] if seq_after else None
-
-    lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
-    lines.append(f"{break_pad}await asyncio.sleep(3)")
-    lines.append(f"{loop_pad}else:")
-    lines.append(
-        f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")'
-    )
-    lines.append(f"{loop_pad}    return")
+            if tail_node.output_schema:
+                ctx["prev_output_var"][0] = f"{lg.tail}_out"
+            emitted.add(lg.tail)
+            lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
+            lines.append(f"{break_pad}await asyncio.sleep(3)")
+            # After unconditional loop: follow sequential successors of tail outside the loop
+            loop_inner = ctx["loop_inner_members"]
+            seq_after = [
+                e.target
+                for e in ctx["out_edges"].get(lg.tail, [])
+                if e.type == "sequential" and e.target not in loop_inner
+            ]
+            after_loop_nid = seq_after[0] if seq_after else None
 
     return lines, after_loop_nid
 
@@ -1095,7 +1157,7 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
         lines.append("from orbit import session")
     if has_bootstrap_nodes:
         lines.append("from orbit import Bootstrap")
-    lines.append("from state import pause_event, report_node, report_node_output")
+    lines.append("from state import pause_event, report_node, report_node_output, report_node_log")
     lines.append(f"_inputs = {repr(inputs or {})}")
     lines.append("")
     if log_file_path:
@@ -1150,8 +1212,8 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
     lines.append(f'    model = "{global_cfg.llm}"')
     lines.append(f"    verbose = {global_cfg.verbose}")
     lines.append("")
+    lines.append("    import sys as _sys")
     if log_file_path:
-        lines.append("    import sys as _sys")
         lines.append(
             '    _log_fh = open(_LOG_FILE, "w", encoding="utf-8", buffering=1)'
         )
@@ -1162,7 +1224,29 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
         lines.append("        def __getattr__(self, n): return getattr(self._a, n)")
         lines.append("    _sys.stdout = _WFTee(_sys.__stdout__, _log_fh)")
         lines.append("    _sys.stderr = _WFTee(_sys.__stderr__, _log_fh)")
-        lines.append("")
+    # Per-node stdout capture — wraps whatever stdout is now (plain or Tee'd)
+    # and streams each printed line to the UI via report_node_log.
+    lines.append("    _current_log_node = [None]")
+    lines.append("    class _NodeLogTee:")
+    lines.append("        def __init__(self, w): self._w = w")
+    lines.append("        def write(self, s):")
+    lines.append("            self._w.write(s)")
+    lines.append("            self._w.flush()")
+    lines.append("            nid = _current_log_node[0]")
+    lines.append("            if nid and s.strip():")
+    lines.append("                report_node_log(nid, s.rstrip('\\n'))")
+    lines.append("        def flush(self): self._w.flush()")
+    lines.append("        def __getattr__(self, n): return getattr(self._w, n)")
+    lines.append("    _sys.stdout = _NodeLogTee(_sys.stdout)")
+    lines.append("    _sys.stderr = _NodeLogTee(_sys.stderr)")
+    # Re-attach logging handlers so they pick up the new stderr wrapper.
+    lines.append("    import logging as _logging")
+    lines.append("    for _lname in ('orbit', 'root'):")
+    lines.append("        _lg = _logging.getLogger(_lname) if _lname != 'root' else _logging.getLogger()")
+    lines.append("        for _h in list(_lg.handlers):")
+    lines.append("            if isinstance(_h, _logging.StreamHandler) and not isinstance(_h, _logging.FileHandler):")
+    lines.append("                _h.stream = _sys.stderr")
+    lines.append("")
     lines.append("    async with session() as s:")
 
     # Find root nodes: no incoming DAG edges (excluding loop_back) and not loop inner members
