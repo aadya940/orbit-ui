@@ -69,6 +69,13 @@ export default function OrbitNode({ data, selected }) {
   if (isSuccess) { borderColor = '#22c55e'; boxShadow = '0 0 0 2.5px #22c55e'; }
   if (isError)   { borderColor = '#ef4444'; boxShadow = '0 0 0 2.5px #ef4444'; }
 
+  // Latest log message for live preview (filter out very short/empty lines)
+  const latestMsg = data.latestLog?.msg?.trim();
+  const showLiveLog = isRunning && latestMsg && latestMsg.length > 3;
+  const truncatedLog = latestMsg && latestMsg.length > 44
+    ? latestMsg.slice(0, 44) + '…'
+    : latestMsg;
+
   return (
     <div
       className={isRunning ? 'node-running' : undefined}
@@ -79,7 +86,7 @@ export default function OrbitNode({ data, selected }) {
         background: '#fff',
         border: `1.5px solid ${borderColor}`,
         boxShadow,
-        padding: '14px 12px 12px',
+        padding: '14px 12px 10px',
         textAlign: 'center',
         position: 'relative',
       }}
@@ -145,6 +152,24 @@ export default function OrbitNode({ data, selected }) {
         </div>
       )}
 
+      {/* Live log line while running */}
+      {showLiveLog && (
+        <div style={{
+          marginTop: 6,
+          fontSize: 9,
+          color: '#6b7280',
+          fontFamily: 'Geist Mono, Consolas, monospace',
+          lineHeight: 1.4,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          textAlign: 'left',
+          padding: '0 1px',
+        }}>
+          {truncatedLog}
+        </div>
+      )}
+
       {/* Output pill */}
       {data.output != null && (() => {
         const lines = formatOutput(data.output);
@@ -172,6 +197,41 @@ export default function OrbitNode({ data, selected }) {
           </div>
         );
       })()}
+
+      {/* Log button — always visible */}
+      <button
+        className="nodrag"
+        onClick={(e) => { e.stopPropagation(); data.onOpenLog?.(); }}
+        title={data.hasLogs ? 'View run log' : 'No logs yet — run the workflow first'}
+        style={{
+          marginTop: 8,
+          width: '100%',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '4px 8px',
+          background: data.hasLogs ? '#1a1a1a' : '#f0efed',
+          border: `1px solid ${data.hasLogs ? '#1a1a1a' : '#d4d2ce'}`,
+          borderRadius: 5,
+          cursor: 'pointer',
+          fontSize: 10,
+          fontWeight: 500,
+          color: data.hasLogs ? '#fff' : '#888',
+          fontFamily: 'Geist, sans-serif',
+          letterSpacing: '-0.1px',
+          transition: 'background 0.12s',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.background = data.hasLogs ? '#333' : '#e5e3df';
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.background = data.hasLogs ? '#1a1a1a' : '#f0efed';
+        }}
+      >
+        <span>logs</span>
+        {data.logCount > 0
+          ? <span style={{ fontSize: 9, opacity: 0.7, fontFamily: 'Geist Mono, monospace' }}>{data.logCount}</span>
+          : <span style={{ fontSize: 9, opacity: 0.5 }}>—</span>
+        }
+      </button>
 
       {data.nodeType === 'Check' && (
         <>

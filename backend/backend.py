@@ -328,6 +328,7 @@ async def events():
                 "type": "snapshot",
                 "statuses": _state.get_node_statuses(),
                 "outputs": _state.get_node_outputs(),
+                "logs": _state.get_node_logs(),
             }
         )
         yield f"data: {snapshot}\n\n"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ReactFlow, applyEdgeChanges, applyNodeChanges,
-  Background, Controls,
+  Background, Controls, useReactFlow,
   BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
 } from '@xyflow/react';
 import OrbitNode from './OrbitNode';
@@ -70,30 +70,67 @@ const EDGE_STROKE = {
   foreach_done:      '#94a3b8',
 };
 
-export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onConnect, onSelectNode, onEdgeDelete, selectedNodeId, nodeStatuses = {}, nodeOutputs = {} }) {
-  // Keep a ref so edge components always call the latest callback, never a stale closure
+// Auto-pans the viewport to the currently running node.
+// Must live inside <ReactFlow> to use useReactFlow().
+function AutoPanner({ nodeStatuses }) {
+  const { setCenter, getNode, getZoom } = useReactFlow();
+  const prevStatuses = useRef({});
+
+  useEffect(() => {
+    for (const [id, status] of Object.entries(nodeStatuses)) {
+      if (status === 'running' && prevStatuses.current[id] !== 'running') {
+        const node = getNode(id);
+        if (node) {
+          const w = node.measured?.width ?? 160;
+          const h = node.measured?.height ?? 100;
+          setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+            zoom: Math.max(getZoom(), 0.75),
+            duration: 350,
+          });
+        }
+      }
+    }
+    prevStatuses.current = { ...nodeStatuses };
+  }, [nodeStatuses, setCenter, getNode, getZoom]);
+
+  return null;
+}
+
+export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onConnect, onSelectNode, onEdgeDelete, selectedNodeId, nodeStatuses = {}, nodeOutputs = {}, nodeLogs = {}, onOpenLog }) {
+  // Keep refs so edge/log callbacks always call the latest version, never a stale closure
   const onEdgeDeleteRef = useRef(onEdgeDelete);
   useEffect(() => { onEdgeDeleteRef.current = onEdgeDelete; }, [onEdgeDelete]);
   const stableOnEdgeDelete = useCallback((id) => onEdgeDeleteRef.current?.(id), []);
 
+  const onOpenLogRef = useRef(onOpenLog);
+  useEffect(() => { onOpenLogRef.current = onOpenLog; }, [onOpenLog]);
+  const stableOnOpenLog = useCallback((id) => onOpenLogRef.current?.(id), []);
+
   const flowNodes = useMemo(
     () =>
-      graph.nodes.map((node) => ({
-        id: node.id,
-        type: 'orbitNode',
-        position: node.position,
-        width: node.width,
-        height: node.height,
-        measured: node.measured,
-        data: {
-          nodeType: node.type,
-          label: node.label,
-          preview: node.config?.target || node.config?.task || node.config?.condition || node.config?.code || node.config?.class_name || node.config?.packages || '',
-          status: nodeStatuses[node.id] || null,
-          output: nodeOutputs[node.id] ?? null,
-        },
-      })),
-    [graph.nodes, nodeStatuses, nodeOutputs]
+      graph.nodes.map((node) => {
+        const logs = nodeLogs[node.id] || [];
+        return {
+          id: node.id,
+          type: 'orbitNode',
+          position: node.position,
+          width: node.width,
+          height: node.height,
+          measured: node.measured,
+          data: {
+            nodeType: node.type,
+            label: node.label,
+            preview: node.config?.target || node.config?.task || node.config?.condition || node.config?.code || node.config?.class_name || node.config?.packages || '',
+            status: nodeStatuses[node.id] || null,
+            output: nodeOutputs[node.id] ?? null,
+            latestLog: logs.at(-1) || null,
+            logCount: logs.length,
+            hasLogs: logs.length > 0,
+            onOpenLog: () => stableOnOpenLog(node.id),
+          },
+        };
+      }),
+    [graph.nodes, nodeStatuses, nodeOutputs, nodeLogs, stableOnOpenLog]
   );
 
   const flowEdges = useMemo(
@@ -170,6 +207,7 @@ export default function GraphBuilder({ graph, onNodesChange, onEdgesChange, onCo
       >
         <Background gap={20} color="#d9d9d9" variant="dots" size={1} />
         <Controls showInteractive={false} />
+        <AutoPanner nodeStatuses={nodeStatuses} />
       </ReactFlow>
 
       {graph.nodes.length === 0 && (
