@@ -1,4 +1,5 @@
 import SchemaEditor from "./SchemaEditor";
+import PromptInput from "./PromptInput";
 
 const LLM_SUGGESTIONS = [
   "gemini-3-flash-preview",
@@ -322,20 +323,35 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
       {nodeType === "Do" && (
         <div style={styles.fieldGroup}>
           <label style={styles.label}>Task</label>
-          <textarea style={styles.textarea} value={config.task || ""} onChange={(e) => updateConfig("task", e.target.value)} placeholder="Describe the action..." />
+          <PromptInput
+            label="Task"
+            value={config.task || ""}
+            onChange={(v) => updateConfig("task", v)}
+            placeholder="Describe the action..."
+          />
         </div>
       )}
       {nodeType === "Check" && (
         <div style={styles.fieldGroup}>
           <label style={styles.label}>Condition</label>
-          <textarea style={styles.textarea} value={config.condition || ""} onChange={(e) => updateConfig("condition", e.target.value)} placeholder="Describe the condition to check..." />
+          <PromptInput
+            label="Condition"
+            value={config.condition || ""}
+            onChange={(v) => updateConfig("condition", v)}
+            placeholder="Describe the condition to check..."
+          />
         </div>
       )}
       {nodeType === "Fill" && (
         <>
           <div style={styles.fieldGroup}>
             <label style={styles.label}>Form target</label>
-            <textarea style={styles.textarea} value={config.target || ""} onChange={(e) => updateConfig("target", e.target.value)} placeholder="Describe which form to fill..." />
+            <PromptInput
+              label="Form target"
+              value={config.target || ""}
+              onChange={(v) => updateConfig("target", v)}
+              placeholder="Describe which form to fill..."
+            />
           </div>
           <div style={styles.fieldGroup}>
             <label style={styles.label}>Data (field : value)</label>
@@ -346,13 +362,25 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
       {nodeType === "Read" && (
         <div style={styles.fieldGroup}>
           <label style={styles.label}>Task</label>
-          <textarea style={styles.textarea} value={config.task || ""} onChange={(e) => updateConfig("task", e.target.value)} placeholder="Describe what to extract..." />
+          <PromptInput
+            label="Task"
+            value={config.task || ""}
+            onChange={(v) => updateConfig("task", v)}
+            placeholder="Describe what to extract..."
+          />
         </div>
       )}
       {nodeType === "Code" && (
         <div style={styles.fieldGroup}>
           <label style={styles.label}>Python code</label>
-          <textarea style={styles.codeArea} value={config.code || ""} onChange={(e) => updateConfig("code", e.target.value)} placeholder="await asyncio.sleep(3)" />
+          <PromptInput
+            label="Python code"
+            language="python"
+            value={config.code || ""}
+            onChange={(v) => updateConfig("code", v)}
+            placeholder="await asyncio.sleep(3)"
+            minHeight={80}
+          />
         </div>
       )}
       {nodeType === "Agent" && (
@@ -367,7 +395,12 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
           </div>
           <div style={styles.fieldGroup}>
             <label style={styles.label}>Prompt template</label>
-            <textarea style={styles.textarea} value={config.prompt_template || ""} onChange={(e) => updateConfig("prompt_template", e.target.value)} placeholder={"Use {task} to refer to the runtime task.\nExample: Search for {task} and return the first result."} />
+            <PromptInput
+              label="Prompt template"
+              value={config.prompt_template || ""}
+              onChange={(v) => updateConfig("prompt_template", v)}
+              placeholder={"Use {task} to refer to the runtime task.\nExample: Search for {task} and return the first result."}
+            />
           </div>
         </>
       )}
@@ -376,11 +409,13 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
         <>
           <div style={styles.fieldGroup}>
             <label style={styles.label}>Items expression</label>
-            <textarea
-              style={{ ...styles.textarea, minHeight: 70, fontFamily: 'Consolas, monospace', fontSize: 11 }}
+            <PromptInput
+              label="Items expression"
+              language="python"
               value={config.items_expr || ''}
-              onChange={(e) => updateConfig("items_expr", e.target.value)}
+              onChange={(v) => updateConfig("items_expr", v)}
               placeholder={"open('/workspace/uploads/links.txt').read().splitlines()\n# or: ['url1', 'url2']\n# or: read_node_out.urls"}
+              minHeight={70}
             />
             <span style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>Any Python expression returning an iterable. Use a Code node above for imports.</span>
           </div>
@@ -400,11 +435,12 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
       {nodeType === "Bootstrap" && (
         <div style={styles.fieldGroup}>
           <label style={styles.label}>Packages</label>
-          <textarea
-            style={{ ...styles.textarea, minHeight: 70, fontFamily: 'Consolas, monospace', fontSize: 11 }}
+          <PromptInput
+            label="Packages"
             value={config.packages || ''}
-            onChange={(e) => updateConfig("packages", e.target.value)}
+            onChange={(v) => updateConfig("packages", v)}
             placeholder={"ffmpeg\nimagemagick\nwkhtmltopdf"}
+            minHeight={70}
           />
           <span style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>One package per line (or comma-separated). Runs apt-get install before the workflow starts.</span>
         </div>
@@ -429,7 +465,12 @@ export default function NodeConfigPanel({ node, onUpdate, onClose, onDelete }) {
           {showExtraInfo && (
             <div style={styles.fieldGroup}>
               <label style={styles.label}>Extra info (optional)</label>
-              <textarea style={styles.textarea} value={config.extra_info || ""} onChange={(e) => updateConfig("extra_info", e.target.value)} placeholder="Advisory context for the agent..." />
+              <PromptInput
+                label="Extra info"
+                value={config.extra_info || ""}
+                onChange={(v) => updateConfig("extra_info", v)}
+                placeholder="Advisory context for the agent..."
+              />
             </div>
           )}
 

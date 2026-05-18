@@ -67,7 +67,7 @@ RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 RUN pip install --upgrade pip setuptools wheel websockify
-RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.43 python-dotenv pillow ddgs pandas fastapi uvicorn patchright croniter
+RUN pip install --retries 5 --timeout 60 orbit-cua==0.2.47 python-dotenv pillow ddgs pandas fastapi uvicorn patchright croniter
 RUN apt-get update -o Acquire::Retries=3 && apt-get install -y fonts-ipafont-gothic fonts-freefont-ttf fonts-noto-color-emoji fonts-tlwg-loma-otf fonts-unifont fonts-wqy-zenhei xfonts-cyrillic || true && patchright install chromium --with-deps
 
 # Pre-seed XFCE config running as root to avoid D-Bus permission issues
