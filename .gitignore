@@ -17,3 +17,12 @@ __pycache__/
 # Misc
 commands.txt
 .DS_Store
+
+# Local-only Docker Compose overrides (e.g. workspace path on Windows)
+docker-compose.override.yml
+
+# Runtime workspace (orbit.db, runs/, generated workflow.py, uploads, etc.)
+workspace/
+
+# Claude Code scratch + worktrees
+.claude/

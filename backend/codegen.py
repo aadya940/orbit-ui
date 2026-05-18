@@ -219,26 +219,52 @@ def _reachable_between(
     out_edges: dict[str, list[Edge]],
     topo_order: list[str],
 ) -> list[str]:
-    """Nodes reachable from header (not via loop_back) before reaching tail.
+    """Nodes strictly between the loop header and tail in the DAG.
 
-    Returns the nodes in topo order, excluding header and tail themselves.
+    A node N is in the loop body iff it is BOTH reachable from the header (via
+    DAG edges, i.e. excluding loop_back) AND can reach the tail (via DAG edges).
+    Just "reachable from header" is not enough — that pulls in conditional
+    branches that exit the loop (e.g. a Check at the header with a
+    conditional_true edge to an external "end" node).
+
+    Returns body nodes in topo order, excluding the header and tail.
     """
-    visited: set[str] = set()
+    # Forward: nodes reachable from header in DAG (excluding loop_back)
+    forward: set[str] = set()
     stack = [header]
     while stack:
         nid = stack.pop()
-        if nid in visited:
+        if nid in forward:
             continue
-        visited.add(nid)
+        forward.add(nid)
         for e in out_edges.get(nid, []):
             if e.type == "loop_back":
                 continue
-            if e.target == tail:
-                continue
-            if e.target not in visited:
+            if e.target not in forward:
                 stack.append(e.target)
-    visited.discard(header)
-    return [n for n in topo_order if n in visited]
+
+    # Backward: nodes that can reach the tail in DAG. Build inverse adjacency
+    # on the fly, filtering out loop_back edges.
+    in_edges_dag: dict[str, list[str]] = {}
+    for src, es in out_edges.items():
+        for e in es:
+            if e.type == "loop_back":
+                continue
+            in_edges_dag.setdefault(e.target, []).append(src)
+
+    backward: set[str] = set()
+    stack = [tail]
+    while stack:
+        nid = stack.pop()
+        if nid in backward:
+            continue
+        backward.add(nid)
+        for src in in_edges_dag.get(nid, []):
+            if src not in backward:
+                stack.append(src)
+
+    body = (forward & backward) - {header, tail}
+    return [n for n in topo_order if n in body]
 
 
 def _find_merge_point(
@@ -765,6 +791,89 @@ def _emit_check_expr(
     return f'await Check({q}"{condition}", {common}).check()'
 
 
+def _emit_loop_check(
+    check_node: Node,
+    check_nid: str,
+    inner_indent: int,
+    ctx: dict,
+) -> tuple[list[str], str | None]:
+    """Emit a Check that lives at a loop header/tail, with edge-driven break direction.
+
+    Returns (lines, after_loop_nid).
+
+    Routing rules — driven by the Check's outgoing edges, not by hard-coded
+    convention:
+
+    | True target outside loop | False target outside loop | Behavior |
+    |--------------------------|---------------------------|----------|
+    | yes                      | no/missing                | break on True,  jump to true_target |
+    | no/missing               | yes                       | break on False, jump to false_target |
+    | yes                      | yes                       | branch on True/False, both break, jump to respective target |
+    | no/missing               | no/missing                | no break (both branches loop or are absent); fall through to next iteration |
+
+    If the Check has no conditional edges but has a sequential successor outside
+    the loop, treat it as if true→sequential_target (preserves legacy
+    "break on True" behavior for graphs drawn without conditional edges).
+    """
+    inner_pad = "    " * inner_indent
+    break_pad = "    " * (inner_indent + 1)
+    check_expr = _emit_check_expr(check_node, ctx["global_cfg"], ctx["nodes_by_id"])
+
+    cond = ctx["conditionals"].get(check_nid, {})
+    true_target = cond.get("true")
+    false_target = cond.get("false")
+    loop_inner = ctx["loop_inner_members"]
+
+    true_outside = bool(true_target) and true_target not in loop_inner
+    false_outside = bool(false_target) and false_target not in loop_inner
+
+    seq_outside = [
+        e.target
+        for e in ctx["out_edges"].get(check_nid, [])
+        if e.type == "sequential" and e.target not in loop_inner
+    ]
+
+    # If there are no conditional edges but there IS a sequential successor
+    # outside the loop, treat that as the True-exit path (legacy default).
+    if not true_outside and not false_outside and seq_outside:
+        true_outside = True
+        true_target = seq_outside[0]
+
+    lines: list[str] = []
+    lines.append(f'{inner_pad}report_node({check_nid!r}, "running")')
+    lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
+
+    if true_outside and false_outside:
+        # Both branches exit the loop with different destinations.
+        # Properly supporting this requires post-loop runtime dispatch which the
+        # current after_loop_nid interface doesn't expose. Surface as a clear
+        # codegen error so the user can restructure.
+        raise CodegenError(
+            f"Check {check_nid!r} ({check_node.label!r}) has both conditional_true "
+            f"and conditional_false edges leaving the loop. Post-loop dispatch on "
+            f"two different exit targets is not yet supported. Route both branches "
+            f"to the same node after the loop, or restructure so only one branch "
+            f"exits the loop and the other loops back."
+        )
+
+    if true_outside:
+        lines.append(f'{inner_pad}if {check_expr}:')
+        lines.append(f'{break_pad}report_node({check_nid!r}, "success")')
+        lines.append(f'{break_pad}break')
+        return lines, true_target
+
+    if false_outside:
+        lines.append(f'{inner_pad}if not {check_expr}:')
+        lines.append(f'{break_pad}report_node({check_nid!r}, "success")')
+        lines.append(f'{break_pad}break')
+        return lines, false_target
+
+    # No exit at all — Check is informational. Still call it so its status updates.
+    lines.append(f'{inner_pad}_ = {check_expr}')
+    lines.append(f'{inner_pad}report_node({check_nid!r}, "success")')
+    return lines, None
+
+
 # ── Recursive subgraph emission ──────────────────────────────────────────────
 
 
@@ -786,6 +895,47 @@ def _emit_loop_group(
 
     header_node = nodes_by_id[lg.header]
     tail_node = nodes_by_id[lg.tail]
+
+    # ── Self-loop (header == tail) ───────────────────────────────────────
+    if lg.header == lg.tail:
+        lines.append(f"{loop_pad}for _attempt_{lg.header} in range({lg.max_iterations}):")
+        if header_node.type == "Check":
+            check_lines, after_loop_nid = _emit_loop_check(header_node, lg.header, inner_indent, ctx)
+            lines.extend(check_lines)
+        else:
+            lines.extend(
+                _emit_node(
+                    header_node,
+                    global_cfg,
+                    nodes_by_id,
+                    inner_indent,
+                    log_file_path,
+                    ctx["prev_output_var"][0],
+                )
+            )
+            if header_node.output_schema:
+                ctx["prev_output_var"][0] = f"{lg.header}_out"
+            after_loop_nid = None
+        lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
+        lines.append(f"{break_pad}await asyncio.sleep(3)")
+        if header_node.type == "Check" and (
+            after_loop_nid is not None or any("break" in l for l in check_lines)
+        ):
+            lines.append(f"{loop_pad}else:")
+            lines.append(f'{loop_pad}    report_node({lg.header!r}, "error")')
+            lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+            lines.append(f"{loop_pad}    return")
+        # If the Check helper picked an exit target, return it. Otherwise compute
+        # from sequential successors that aren't the header itself.
+        if after_loop_nid is None:
+            loop_inner = ctx["loop_inner_members"]
+            seq_after = [
+                e.target
+                for e in ctx["out_edges"].get(lg.header, [])
+                if e.type == "sequential" and e.target != lg.header and e.target not in loop_inner
+            ]
+            after_loop_nid = seq_after[0] if seq_after else None
+        return lines, after_loop_nid
 
     lines.append(f"{loop_pad}for _attempt_{lg.header} in range({lg.max_iterations}):")
 
@@ -822,29 +972,18 @@ def _emit_loop_group(
                 ctx["prev_output_var"][0] = f"{lg.tail}_out"
         emitted.add(lg.tail)
         check_node, check_nid = header_node, lg.header
-        check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
-        lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
-        lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
-        lines.append(f"{inner_pad}if {check_expr}:")
-        lines.append(f'{break_pad}report_node("{check_nid}", "success")')
-        cond = ctx["conditionals"].get(check_nid, {})
-        true_target = cond.get("true")
-        loop_inner = ctx["loop_inner_members"]
-        lines.append(f"{break_pad}break")
-        if true_target and true_target not in loop_inner:
-            after_loop_nid: str | None = true_target
-        else:
-            seq_after = [
-                e.target
-                for e in ctx["out_edges"].get(check_nid, [])
-                if e.type == "sequential" and e.target not in loop_inner
-            ]
-            after_loop_nid = seq_after[0] if seq_after else None
+        check_lines, after_loop_nid = _emit_loop_check(check_node, check_nid, inner_indent, ctx)
+        lines.extend(check_lines)
         lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
         lines.append(f"{break_pad}await asyncio.sleep(3)")
-        lines.append(f"{loop_pad}else:")
-        lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
-        lines.append(f"{loop_pad}    return")
+        # Only emit the for-else "CRITICAL" branch if the loop has an actual exit
+        # condition (a break inside). Without a break, the for-loop runs to
+        # completion normally — no failure state.
+        if after_loop_nid is not None or any("break" in l for l in check_lines):
+            lines.append(f"{loop_pad}else:")
+            lines.append(f'{loop_pad}    report_node({check_nid!r}, "error")')
+            lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+            lines.append(f"{loop_pad}    return")
     else:
         # Pattern B: non-Check header (e.g. Navigate → Check)
         lines.extend(
@@ -877,32 +1016,18 @@ def _emit_loop_group(
             emitted.add(body_nid)
 
         if tail_node.type == "Check":
-            # Tail is a Check — use it as the exit condition
+            # Tail is a Check — use it as the exit condition (edge-driven)
             emitted.add(lg.tail)
             check_node, check_nid = tail_node, lg.tail
-            check_expr = _emit_check_expr(check_node, global_cfg, nodes_by_id)
-            lines.append(f'{inner_pad}report_node("{check_nid}", "running")')
-            lines.append(f'{inner_pad}print("--- {check_nid}: {check_node.label} ---")')
-            lines.append(f"{inner_pad}if {check_expr}:")
-            lines.append(f'{break_pad}report_node("{check_nid}", "success")')
-            cond = ctx["conditionals"].get(check_nid, {})
-            true_target = cond.get("true")
-            loop_inner = ctx["loop_inner_members"]
-            lines.append(f"{break_pad}break")
-            if true_target and true_target not in loop_inner:
-                after_loop_nid: str | None = true_target
-            else:
-                seq_after = [
-                    e.target
-                    for e in ctx["out_edges"].get(check_nid, [])
-                    if e.type == "sequential" and e.target not in loop_inner
-                ]
-                after_loop_nid = seq_after[0] if seq_after else None
+            check_lines, after_loop_nid = _emit_loop_check(check_node, check_nid, inner_indent, ctx)
+            lines.extend(check_lines)
             lines.append(f"{inner_pad}if _attempt_{lg.header} < {lg.max_iterations - 1}:")
             lines.append(f"{break_pad}await asyncio.sleep(3)")
-            lines.append(f"{loop_pad}else:")
-            lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
-            lines.append(f"{loop_pad}    return")
+            if after_loop_nid is not None or any("break" in l for l in check_lines):
+                lines.append(f"{loop_pad}else:")
+                lines.append(f'{loop_pad}    report_node({check_nid!r}, "error")')
+                lines.append(f'{loop_pad}    print("CRITICAL: Failed after {lg.max_iterations} attempts.")')
+                lines.append(f"{loop_pad}    return")
         else:
             # No Check at tail — unconditional retry loop, runs up to max_iterations times
             lines.extend(
@@ -1081,6 +1206,53 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
                 "false": false_targets[0] if false_targets else None,
             }
 
+    # ── Loop validation (fail fast on unsupported patterns) ───────────────
+    # Reject duplicate loop_back edges with the same target — the loop_headers
+    # dict would silently drop all but one.
+    loop_back_targets: dict[str, int] = {}
+    for e in edges:
+        if e.type == "loop_back":
+            loop_back_targets[e.target] = loop_back_targets.get(e.target, 0) + 1
+    for header_nid, count in loop_back_targets.items():
+        if count > 1:
+            label = nodes_by_id[header_nid].label if header_nid in nodes_by_id else header_nid
+            raise CodegenError(
+                f"Node {header_nid!r} ({label!r}) is the target of {count} loop_back "
+                f"edges. Only one loop_back can target a given node. Delete the extras "
+                f"or restructure into nested loops (not yet supported)."
+            )
+
+    # Reject body patterns the loop emitter doesn't handle correctly.
+    # _emit_loop_group iterates body nodes via _emit_node directly, which does
+    # not understand conditional branches, ForEach iteration, or nested loops.
+    # Surface these as clear errors instead of emitting silently-wrong code.
+    for lg in loops:
+        if lg.header == lg.tail:
+            continue  # self-loops handled specially
+        for body_nid in lg.body:
+            body_node = nodes_by_id.get(body_nid)
+            if body_node is None:
+                continue
+            label = body_node.label or body_nid
+            if body_node.type == "ForEach":
+                raise CodegenError(
+                    f"Loop body contains a ForEach node {body_nid!r} ({label!r}). "
+                    f"ForEach inside a loop_back loop is not yet supported. Move the "
+                    f"ForEach outside the loop, or use ForEach instead of loop_back."
+                )
+            if body_nid in conditionals:
+                raise CodegenError(
+                    f"Loop body contains a conditional Check node {body_nid!r} "
+                    f"({label!r}). Conditional branches inside a loop body are not "
+                    f"yet supported. Restructure so the Check is the loop header or tail."
+                )
+            if body_nid in loop_headers:
+                raise CodegenError(
+                    f"Nested loop_back detected: node {body_nid!r} ({label!r}) is a "
+                    f"loop header inside another loop's body. Nested loops are not "
+                    f"yet supported."
+                )
+
     # ── Build emission context ────────────────────────────────────────────
     ctx = {
         "nodes_by_id": nodes_by_id,
@@ -1255,10 +1427,14 @@ def generate(graph_data: dict, log_file_path: str | None = None, inputs: dict | 
         if e.type != "loop_back":
             dag_in_degree[e.target] = dag_in_degree.get(e.target, 0) + 1
 
+    # A node that is a loop header (i.e. the target of a loop_back edge) is also
+    # a valid entry point even if it's also a tail/body member of that same loop
+    # (self-loop case). So allow loop_headers through the inner-members filter.
     roots = [
         nid
         for nid in order
-        if dag_in_degree.get(nid, 0) == 0 and nid not in loop_inner_members
+        if dag_in_degree.get(nid, 0) == 0
+        and (nid not in loop_inner_members or nid in loop_headers)
     ]
 
     # Emit all subgraphs from roots using recursive emission
